@@ -6,6 +6,7 @@
 // are returned with a `lastSeenDay` so the UI can fade them.
 
 const db = require("./db");
+const { decorateCrew, decorateStorage } = require("./lookups");
 
 function listDays() {
   return db
@@ -111,11 +112,13 @@ function fullSnapshot(snapshotId, gameDay) {
     if (row.snapshot_id === snapshotId) ship.present = true;
   }
 
-  // Crew: each row's props_json is the FULL flat crew object.
+  // Crew: each row's props_json is the FULL flat crew object. decorateCrew
+  // tacks on human names from the library tables (or "#ID" placeholders if
+  // the library hasn't been imported yet).
   const crew = db
     .prepare("SELECT cid, name, props_json FROM crew_snapshots WHERE snapshot_id = ?")
     .all(snapshotId)
-    .map((c) => safeJson(c.props_json) || { cid: c.cid, name: c.name });
+    .map((c) => decorateCrew(safeJson(c.props_json) || { cid: c.cid, name: c.name }));
 
   const events = db
     .prepare(
@@ -123,9 +126,11 @@ function fullSnapshot(snapshotId, gameDay) {
     )
     .all(gameDay);
 
-  const storage = db
-    .prepare("SELECT elementary_id, count FROM storage_observations WHERE snapshot_id = ?")
-    .all(snapshotId);
+  const storage = decorateStorage(
+    db
+      .prepare("SELECT elementary_id, count FROM storage_observations WHERE snapshot_id = ?")
+      .all(snapshotId)
+  );
 
   return {
     snapshotId,

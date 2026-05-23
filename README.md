@@ -76,6 +76,32 @@ The **fog of war** falls out naturally: when the slider sits at day N, a body
 is rendered if it was visible in *any* snapshot at or before day N. Bodies
 visible earlier but not in the chosen snapshot fade.
 
+## Game data lookup
+
+The dashboard reads `library/texts` and `library/haven` from your installed
+`spacehaven.jar` to translate the game's numeric ids into human names
+(`#2668` becomes "Fatty acids deficiency"). This applies to crew conditions,
+traits, attributes, ship storage items and faction names.
+
+- The import runs **automatically on startup** if the library has never been
+  imported, or if Bugbyte has shipped a game update (detected by jar mtime).
+- You can manually force a refresh with:
+
+  ```bash
+  npm run import-library
+  ```
+
+- If `spacehaven.jar` isn't found in the usual Steam locations, the dashboard
+  logs a warning and continues — every id just renders as `#1582` etc. Set
+  `SPACE_HAVEN_JAR_PATH=/your/path/to/spacehaven.jar` if your install lives
+  somewhere non-standard.
+- The dashboard does **not** redistribute Bugbyte's data. The library is read
+  on your own machine from your own copy of the game on first run, and the
+  resulting names live in your local `data/history.db`.
+
+English is the only display language at present. The import does capture all
+13 language columns, so a future language switcher only needs UI work.
+
 ## API
 
 | Method | Path | Description |
@@ -106,17 +132,13 @@ If you build a similar tool for another game, please steal from these too.
 
 ## Contributing
 
-PRs are very welcome — especially ones filling in the lookup tables. The
-game uses numeric IDs for conditions, traits, attributes, and skills, and we
-only have a partial mapping. Add entries to `src/lookups.js`:
-
-- `CONDITION_NAMES` — by `<conditions><c id=…>` from a save
-- `ATTRIBUTE_NAMES` — by `<attr><a id=…>`
-- `SKILL_NAMES` — by `<skills><s sk=…>`
-- `TRAIT_NAMES` — by `<traits><t id=…>`
-
-The header comment in `src/lookups.js` lists the IDs we've already seen in
-real saves but haven't been able to map confidently.
+PRs welcome. Most of what was previously hand-maintained — condition,
+attribute, item, trait, faction names — is now resolved automatically from
+the game's own `library/` data (see "Game data lookup" above). The one
+remaining manual lookup is skills: the `<s sk="N">` ids in saves don't map
+cleanly to anything in `library/haven`, so `src/lookups.js#skillInfo` still
+returns `Skill #N` placeholders. If you find a reliable mapping, please open
+an issue or PR.
 
 ## Tests
 

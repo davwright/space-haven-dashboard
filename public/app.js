@@ -245,7 +245,8 @@ function conditionStrip(conditions) {
     }
     const moodSum = (cond.moodAccumulators || []).reduce((s, n) => s + n, 0);
     const sev = conditionSeverity(moodSum);
-    const tip = `<strong>Condition #${cond.id}</strong> (level ${cond.level})<br>` +
+    const label = cond.name || `Condition #${cond.id}`;
+    const tip = `<strong>${label}</strong> (level ${cond.level})<br>` +
                 `mood: ${moodSum >= 0 ? "+" : ""}${moodSum}` +
                 (cond.rateAccumulators?.length
                   ? `<br>rate: ${cond.rateAccumulators.join(", ")}` : "");
@@ -266,7 +267,8 @@ function topSkillsCell(skills) {
 function skillChip(s) {
   // Passion flames: 1 flame for mxn 1-4, 2 flames for mxn 5+.
   const flames = s.maxLevelNormal >= 5 ? "▲▲" : s.maxLevelNormal >= 1 ? "▲" : "";
-  return `<span class="skill-chip" title="Skill #${s.sk} · level ${s.level} (max ${s.maxLevelNormal})">
+  const label = s.name || `Skill #${s.sk}`;
+  return `<span class="skill-chip" title="${esc(label)} · level ${s.level} (max ${s.maxLevelNormal})">
     <span class="sk-lvl">${s.level}</span>
     <span class="passion">${flames}</span>
   </span>`;
@@ -291,12 +293,13 @@ function renderNutrition() {
 
   $("nutrition-grid").innerHTML = rows.map(nutRow).join("");
 
-  // Storage panel — group by elementaryId; we don't have a name table yet so
-  // we show "Item #ID".
+  // Storage panel — group by elementaryId. The backend resolves the human
+  // name from element_defs / text_defs when available, falling back to
+  // "Item #ID" for unknown ids.
   const storage = (state.snapshot.storage || []).slice().sort((a, b) => b.count - a.count);
   $("storage-list").innerHTML = storage
     .filter((s) => s.count > 0)
-    .map((s) => `<div class="storage-item"><span>Item #${esc(s.elementary_id)}</span><span>${formatNum(s.count)}</span></div>`)
+    .map((s) => `<div class="storage-item"><span>${esc(s.name || `Item #${s.elementary_id}`)}</span><span>${formatNum(s.count)}</span></div>`)
     .join("") || `<div class="muted">No storage observations yet.</div>`;
 }
 

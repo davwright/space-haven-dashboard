@@ -210,31 +210,55 @@ function extractGalaxyShips(gameDoc) {
 // Walk the <ships><ship sid> tree in the game file. Each <ship> may contain
 // <characters><c .../></characters>. We collect the crew with the enclosing
 // ship's metadata so we can identify the player ship.
+//
+// Some player crew live inside nested carriers (starfighter pods like
+// "Contact Light") whose wrapping <c> does NOT have sid/sname. We catch
+// those by walking every <characters> block and falling back to the
+// nearest ancestor with sid/sname for ship metadata; if there is no such
+// ancestor we still keep the crew, just without a ship id.
 function extractGameShipsAndCrew(gameDoc) {
   const playerCrew = [];
   const playerShips = new Map(); // sid -> { sid, sname }
+  const seenEntIds = new Set();
 
   walk(gameDoc, (node, chain) => {
-    // The <ships> block holds the player-owned ships and any docked / nested
-    // ships at high level. A <ship> here means a real instance with crew.
     if (!node || typeof node !== "object") return;
-    if (node["@_sid"] === undefined || node["@_sname"] === undefined) return;
-    // Only act on actual <ship sid=…> nodes — identified by having a
-    // <characters> sibling subtree.
     const characters = node.characters;
-    if (!characters) return;
+    if (!characters || typeof characters !== "object") return;
     const cArr = Array.isArray(characters.c) ? characters.c : characters.c ? [characters.c] : [];
+
+    // Walk up the ancestor chain looking for the nearest sid/sname pair —
+    // that's the player ship we want to attribute this crew to.
+    let shipSid = null;
+    let shipName = null;
+    if (node["@_sid"] !== undefined && node["@_sname"] !== undefined) {
+      shipSid = String(node["@_sid"]);
+      shipName = node["@_sname"] ? String(node["@_sname"]) : null;
+    } else {
+      for (const anc of chain) {
+        if (anc["@_sid"] !== undefined && anc["@_sname"] !== undefined) {
+          shipSid = String(anc["@_sid"]);
+          shipName = anc["@_sname"] ? String(anc["@_sname"]) : null;
+          break;
+        }
+      }
+    }
+
     let hasPlayerCrew = false;
     for (const c of cArr) {
       if (c["@_side"] !== "Player") continue;
+      // Crew must have a <pers> block (even if empty) — otherwise it's a
+      // vehicle/character template, not an actual person. fast-xml-parser
+      // gives us "" for self-closing <pers/>, so check the key, not truthy.
+      if (!("pers" in c)) continue;
+      const entId = c["@_entId"] != null ? String(c["@_entId"]) : null;
+      if (entId && seenEntIds.has(entId)) continue;
+      if (entId) seenEntIds.add(entId);
       hasPlayerCrew = true;
-      playerCrew.push({ crew: c, shipSid: String(node["@_sid"]), shipName: node["@_sname"] ? String(node["@_sname"]) : null });
+      playerCrew.push({ crew: c, shipSid, shipName });
     }
-    if (hasPlayerCrew) {
-      playerShips.set(String(node["@_sid"]), {
-        sid: String(node["@_sid"]),
-        sname: node["@_sname"] ? String(node["@_sname"]) : null,
-      });
+    if (hasPlayerCrew && shipSid) {
+      playerShips.set(shipSid, { sid: shipSid, sname: shipName });
     }
   });
 

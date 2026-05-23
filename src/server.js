@@ -7,6 +7,7 @@ const { backfillAll } = require("./ingest");
 const watcher = require("./watcher");
 const history = require("./history");
 const { port, projectRoot, saveRoot } = require("./config");
+const { importLibrary, findJar, needsImport } = require("../scripts/import-library");
 
 const sseClients = new Set();
 
@@ -103,8 +104,31 @@ const server = http.createServer((req, res) => {
   res.writeHead(404).end("not found");
 });
 
+function maybeImportLibrary() {
+  const jar = findJar();
+  if (!jar) {
+    console.warn(
+      "[server] spacehaven.jar not found — dashboard will show numeric IDs (#1582 etc) instead of names. Set SPACE_HAVEN_JAR_PATH to fix."
+    );
+    return;
+  }
+  const status = needsImport(jar);
+  if (!status.needed) {
+    console.log(`[server] library up to date (${status.reason})`);
+    return;
+  }
+  console.log(`[server] importing game library from ${jar} (${status.reason})...`);
+  try {
+    importLibrary(jar);
+  } catch (err) {
+    console.error("[server] library import failed:", err.message);
+    console.error("[server] continuing without name lookups");
+  }
+}
+
 function main() {
   console.log(`[server] save root: ${saveRoot}`);
+  maybeImportLibrary();
   console.log("[server] running initial backfill...");
   const results = backfillAll();
   const inserted = results.filter((r) => r.inserted).length;
