@@ -107,8 +107,32 @@ function factionInfo(id) {
   return { id, name: r.name, side: r.side };
 }
 
+// Skill `sk=N` values in saves don't have a numbered definition in haven; the
+// mapping was reverse-engineered by cross-referencing two crew members' save
+// data against their in-game Skills panels (Annika Bailey + Andrew Heacock on
+// 2026-05-24). sk=12 and sk=13 are the two skills not visible in the standard
+// 12-skill panel — they're almost certainly Maintenance and Logistics, but
+// which is which is unverified.
+const SKILL_NAMES = {
+  2:  "Mining",
+  3:  "Botany",
+  4:  "Construct",
+  5:  "Industry",
+  6:  "Medical",
+  7:  "Gunner",
+  8:  "Shielding",
+  9:  "Operations",
+  10: "Weapons",
+  12: "Maintenance",  // unverified — could be Logistics
+  13: "Logistics",    // unverified — could be Maintenance
+  14: "Navigation",
+  16: "Research",
+  22: "Piloting",
+};
+
 function skillInfo(sk) {
-  return { id: sk, name: `Skill #${sk}` };
+  const name = SKILL_NAMES[sk];
+  return { id: sk, name: name || `Skill #${sk}` };
 }
 
 // Compact string accessors for legacy callers.
