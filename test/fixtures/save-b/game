@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<game>
+  <starmap>
+    <systems>
+      <l systemId="1" sn="536f6c" smn="536f6c">
+        <bodies>
+          <l type="Star" id="100" starType="MainSequence" starClass="G" x="0" y="0" centerId="0">
+            <info isVisible="true" deleted="false" visited="false" saved="false"/>
+          </l>
+          <l type="Planet" id="200" x="100" y="50" centerId="100">
+            <info isVisible="true" deleted="false" visited="true" saved="false"/>
+          </l>
+          <l type="Planet" id="201" x="200" y="0" centerId="100">
+            <info isVisible="true" deleted="false" visited="true" saved="false"/>
+            <fleets>
+              <f factionId="3" isPlayer="false" id="888" x="220" y="10">
+                <createdShips>
+                  <l slid="501" shn="Pirate Scum" crew="4" station="false" derelict="false"/>
+                </createdShips>
+              </f>
+            </fleets>
+          </l>
+          <l type="Planet" id="203" x="-300" y="200" centerId="100">
+            <info isVisible="true" deleted="false" visited="false" saved="false"/>
+          </l>
+        </bodies>
+      </l>
+    </systems>
+  </starmap>
+  <ships>
+    <ship sid="500" sname="Player Vessel">
+      <characters>
+        <c entId="9001" cid="89" side="Player" name="Alice" lname="One">
+          <props>
+            <Health v="75" ltv="73"/>
+            <Food v="60" ltv="55">
+              <stored protein="2" carbs="3" fat="1" vitamins="2" toxins="0"/>
+              <belly protein="0.5" carbs="2" fat="0.3" vitamins="0.8" toxins="0"/>
+            </Food>
+            <Rest v="80"/>
+            <Comfort v="50"/>
+            <Oxygen v="0"/>
+            <Mood v="65" ltv="60"/>
+            <Temperature v="100"/>
+            <Co2Gas v="0"/>
+            <SmokeGas v="0"/>
+            <HazardousGas v="0"/>
+          </props>
+          <pers/>
+        </c>
+        <c entId="9002" cid="89" side="Player" name="Bob" lname="Two">
+          <props>
+            <Health v="95"/>
+            <Food v="50">
+              <stored protein="0" carbs="0" fat="0" vitamins="0" toxins="0"/>
+              <belly protein="0" carbs="0" fat="0" vitamins="0" toxins="0"/>
+            </Food>
+            <Rest v="60"/>
+            <Comfort v="50"/>
+            <Oxygen v="0"/>
+            <Mood v="55"/>
+            <Temperature v="100"/>
+            <Co2Gas v="0"/>
+            <SmokeGas v="0"/>
+            <HazardousGas v="0"/>
+          </props>
+          <pers/>
+        </c>
+      </characters>
+    </ship>
+  </ships>
+</game>

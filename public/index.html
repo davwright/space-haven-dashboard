@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Space Haven Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Space Haven Dashboard</h1>
+    <nav>
+      <button data-view="crew" class="active">Crew</button>
+      <button data-view="nutrition">Nutrition</button>
+      <button data-view="galaxy">Galaxy</button>
+    </nav>
+    <div class="hdr-right">
+      <span id="day-pill">Day —</span>
+      <span class="live-indicator" id="live"><span class="dot"></span>Live</span>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- ====== CREW VIEW ====== -->
+    <section id="view-crew" class="view active">
+      <div class="toolbar">
+        <label class="toggle">
+          <input type="checkbox" id="needs-attention"> needs attention only
+        </label>
+        <span class="muted" id="crew-count"></span>
+      </div>
+      <div class="table-wrap">
+        <table class="crew-table">
+          <thead>
+            <tr>
+              <th data-sort="name" class="sort-active">Name</th>
+              <th data-sort="mood">Mood</th>
+              <th data-sort="health">Health</th>
+              <th data-sort="food">Food</th>
+              <th data-sort="rest">Rest</th>
+              <th data-sort="comfort">Comfort</th>
+              <th data-sort="oxygen">O₂</th>
+              <th>Conditions</th>
+              <th>Top Skills</th>
+              <th data-sort="task">Task</th>
+            </tr>
+          </thead>
+          <tbody id="crew-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ====== NUTRITION VIEW ====== -->
+    <section id="view-nutrition" class="view">
+      <div class="toolbar">
+        <label class="toggle">
+          <input type="checkbox" id="hunger-only"> show only crew in food distress
+        </label>
+      </div>
+      <div class="nutrition-grid" id="nutrition-grid"></div>
+      <div class="storage-panel">
+        <h3>Ship storage</h3>
+        <div id="storage-list" class="storage-list"></div>
+      </div>
+    </section>
+
+    <!-- ====== GALAXY VIEW ====== -->
+    <section id="view-galaxy" class="view">
+      <div id="galaxy-canvas-wrap">
+        <svg id="galaxy-svg" preserveAspectRatio="xMidYMid meet"></svg>
+        <div id="tooltip" hidden></div>
+      </div>
+      <div id="slider-bar">
+        <button id="play-btn" title="Play / pause">&#9654;</button>
+        <input type="range" id="day-slider" min="0" max="0" value="0" step="1">
+        <span id="day-label">Day 0</span>
+        <span id="day-range" class="muted"></span>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

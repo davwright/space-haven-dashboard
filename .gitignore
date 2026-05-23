@@ -1,0 +1,20 @@
+node_modules/
+data/history.db
+data/history.db-wal
+data/history.db-shm
+data/*.db
+data/*-journal
+.env
+.env.*
+.vscode/
+.idea/
+*.log
+npm-debug.log*
+
+# Saves the user might dump for local debugging
+*.dump
+*.snapshot
+
+# OS junk
+.DS_Store
+Thumbs.db

@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<game>
+  <starmap>
+    <systems>
+      <l systemId="1" sn="536f6c" smn="536f6c">
+        <bodies>
+          <l type="Star" id="100" starType="MainSequence" starClass="G" x="0" y="0" centerId="0">
+            <info isVisible="true" deleted="false" visited="false" saved="false"/>
+          </l>
+          <l type="Planet" id="200" x="100" y="50" centerId="100">
+            <info isVisible="true" deleted="false" visited="true" saved="false"/>
+            <fleets/>
+          </l>
+          <l type="Planet" id="201" x="200" y="0" centerId="100">
+            <fleets>
+              <f factionId="3" isPlayer="false" id="888" x="200" y="0">
+                <createdShips>
+                  <l slid="501" shn="Pirate Scum" crew="4" station="false" derelict="false"/>
+                </createdShips>
+              </f>
+            </fleets>
+            <info isVisible="true" deleted="false" visited="false" saved="false"/>
+          </l>
+          <l type="Planet" id="202" x="500" y="500" centerId="100">
+            <info isVisible="false" deleted="false" visited="false" saved="false"/>
+          </l>
+        </bodies>
+      </l>
+    </systems>
+  </starmap>
+  <ships>
+    <ship sid="500" sname="Player Vessel">
+      <characters>
+        <c entId="9001" cid="89" side="Player" name="Alice" lname="One" task="Idle" x="1" y="1">
+          <props>
+            <Health v="80" ltv="78"/>
+            <Food v="70" ltv="65">
+              <stored protein="1" carbs="2" fat="0.5" vitamins="1.2" toxins="0"/>
+              <belly protein="0.3" carbs="3" fat="0.2" vitamins="0.5" toxins="0"/>
+            </Food>
+            <Rest v="90" ltv="80"/>
+            <Comfort v="50" ltv="50"/>
+            <Oxygen v="0"/>
+            <Mood v="60" ltv="55"/>
+            <Temperature v="100"/>
+            <Co2Gas v="0"/>
+            <SmokeGas v="0"/>
+            <HazardousGas v="0"/>
+          </props>
+          <pers>
+            <attr>
+              <a id="210" points="3"/>
+              <a id="212" points="2"/>
+            </attr>
+            <traits>
+              <t id="1535"/>
+            </traits>
+            <conditions>
+              <c id="0" level="0"><mood><m ac="0"/></mood></c>
+              <c id="3311" level="1" rs="1"><mood><m ac="4"/></mood></c>
+            </conditions>
+            <skills>
+              <s sk="2" level="3" mxn="5" exp="100"/>
+              <s sk="3" level="1" mxn="2" exp="0"/>
+            </skills>
+            <jobsetting>
+              <j profession="Navigate" priority="Highest"/>
+              <j profession="Cook" priority="Normal"/>
+            </jobsetting>
+          </pers>
+        </c>
+        <c entId="9002" cid="89" side="Player" name="Bob" lname="Two">
+          <props>
+            <Health v="100"/>
+            <Food v="40" ltv="20">
+              <stored protein="0" carbs="0" fat="0" vitamins="0" toxins="0"/>
+              <belly protein="0" carbs="0" fat="0" vitamins="0" toxins="0"/>
+            </Food>
+            <Rest v="70"/>
+            <Comfort v="50"/>
+            <Oxygen v="0"/>
+            <Mood v="50"/>
+            <Temperature v="100"/>
+            <Co2Gas v="0"/>
+            <SmokeGas v="0"/>
+            <HazardousGas v="0"/>
+          </props>
+          <pers>
+            <jobsetting>
+              <j profession="Cook" priority="Highest"/>
+            </jobsetting>
+          </pers>
+        </c>
+      </characters>
+    </ship>
+  </ships>
+</game>
