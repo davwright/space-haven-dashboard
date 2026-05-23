@@ -195,23 +195,54 @@ main { height: calc(100% - 44px); }
 .cond.active.s-extreme { background: var(--extreme); }
 .cond.active.s-happy   { background: var(--happy); }
 
-/* Top-3 skills cell */
-.skills-cell {
-  display: inline-flex; gap: 0.6rem;
-}
-.skill-chip {
-  display: inline-flex; align-items: center; gap: 0.2rem;
+/* Full 12-skill grid (+ Maintenance/Logistics tucked after a divider). Each
+   cell shows a 3-letter abbreviation + level, colored by level severity.
+   Same six bands as stats but inverted: 0 = neutral, high = happy. */
+.skills-grid {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 2px;
+  align-items: center;
   font-variant-numeric: tabular-nums;
 }
-.skill-chip .sk-lvl {
-  background: var(--bg-3); border: 1px solid var(--border);
-  padding: 0 0.3rem; border-radius: 3px;
-  font-size: 0.75rem;
+.skill-cell {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  cursor: help;
+  position: relative;
 }
-.skill-chip .passion {
+.skill-cell.zero { opacity: 0.45; }
+.skill-cell .abbr {
+  color: var(--text-dim);
+  font-weight: 500;
+  letter-spacing: 0.2px;
+}
+.skill-cell .lvl {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.skill-cell.s-extreme { border-color: var(--extreme); }
+.skill-cell.s-major   { border-color: var(--major); }
+.skill-cell.s-minor   .lvl { color: var(--minor); }
+.skill-cell.s-content { border-color: var(--content); }
+.skill-cell.s-content .lvl { color: var(--content); }
+.skill-cell.s-happy   { border-color: var(--happy); }
+.skill-cell.s-happy   .lvl { color: var(--happy); }
+.skill-cell.extra {
+  opacity: 0.6;
+  border-style: dashed;
+}
+.skill-cell .passion {
   color: var(--major);
-  font-size: 0.7rem;
+  font-size: 0.65rem;
   letter-spacing: -1px;
+  margin-left: 2px;
 }
 
 /* ====================================================================
@@ -319,6 +350,65 @@ main { height: calc(100% - 44px); }
 #galaxy-svg .ship { cursor: pointer; }
 #galaxy-svg .ship.faded { opacity: 0.4; }
 #galaxy-svg .ship-path { fill: none; stroke: var(--accent-dim); stroke-width: 80; stroke-dasharray: 200 200; opacity: 0.4; }
+
+/* Aggregated system markers in galaxy view. */
+#galaxy-svg .system { cursor: pointer; }
+#galaxy-svg .system:hover .system-star { stroke: var(--accent); stroke-width: 200; }
+#galaxy-svg .system.faded { opacity: 0.55; }
+#galaxy-svg .visited-ring {
+  fill: none; stroke: var(--accent); stroke-width: 200;
+  stroke-dasharray: 600 400; opacity: 0.7;
+}
+#galaxy-svg .grid-line {
+  stroke: #1c2433; stroke-width: 60; opacity: 0.55;
+}
+#galaxy-svg .orbit-ring {
+  fill: none; stroke: #4a5878; stroke-width: 25;
+  stroke-dasharray: 80 80; opacity: 0.7;
+}
+
+/* Screen-space label overlay so labels stay readable at any zoom. */
+#galaxy-overlay {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  font-family: inherit;
+}
+.system-label-overlay {
+  position: absolute;
+  transform: translate(-50%, 0);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  text-shadow: 0 0 4px #000, 0 0 8px #000;
+  white-space: nowrap;
+  letter-spacing: 0.3px;
+}
+.system-label-overlay.faded { opacity: 0.45; }
+.system-overlay-title {
+  position: absolute;
+  top: 12px; left: 50%;
+  transform: translateX(-50%);
+  color: var(--accent);
+  font-size: 1rem; font-weight: 600;
+  letter-spacing: 0.5px;
+  text-shadow: 0 0 6px #000;
+}
+
+#galaxy-back {
+  position: absolute;
+  top: 12px; left: 12px;
+  z-index: 10;
+  background: var(--bg-3);
+  color: var(--accent);
+  border: 1px solid var(--accent-dim);
+  padding: 0.3rem 0.7rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+}
+#galaxy-back:hover { background: var(--bg-2); border-color: var(--accent); }
+#tooltip .hint { color: var(--text-dim); font-style: italic; }
 
 #tooltip {
   position: absolute;

@@ -24,8 +24,31 @@ const state = {
   sortAsc: true,
   needsAttentionOnly: false,
   hungerOnly: false,
-  galaxy: { scale: 1, tx: 0, ty: 0, drag: null },
+  galaxy: { scale: 1, tx: 0, ty: 0, drag: null, focusSystem: null },
 };
+
+// In-game skill order (12 visible + 2 hidden). Names mirror the game's UI.
+const SKILL_ORDER = [
+  "Mining", "Construct", "Industry", "Botany",
+  "Medical", "Research", "Weapons", "Navigation",
+  "Gunner", "Shielding", "Operations", "Piloting",
+];
+const SKILL_EXTRA = ["Maintenance", "Logistics"];
+const SKILL_ABBR = {
+  Mining: "Min", Construct: "Con", Industry: "Ind", Botany: "Bot",
+  Medical: "Med", Research: "Res", Weapons: "Wpn", Navigation: "Nav",
+  Gunner: "Gun", Shielding: "Shd", Operations: "Ops", Piloting: "Pil",
+  Maintenance: "Mnt", Logistics: "Log",
+};
+
+// Level → severity band (inverted: high level = happy/green, 0 = neutral gray).
+function skillSeverity(level) {
+  if (level <= 0) return "neutral";
+  if (level <= 2) return "minor";
+  if (level <= 4) return "content";
+  if (level <= 7) return "happy";
+  return "happy";
+}
 
 // ---------------------------------------------------------------------------
 //  Severity bands (six discrete buckets, applied uniformly across stats).
@@ -255,23 +278,30 @@ function conditionStrip(conditions) {
   return `<span class="cond-strip">${slots.join("")}</span>`;
 }
 
+// Render all 12 in-game skills as a labeled mini-grid, with Maintenance &
+// Logistics tucked at the end. Each cell shows a 3-letter abbreviation + level
+// number, colored by level (gray=0, green=high). Full name + max-natural-level
+// + passion flames live in the hover tooltip so glance-readability stays high.
 function topSkillsCell(skills) {
-  const top = skills
-    .filter((s) => s.level > 0)
-    .sort((a, b) => b.level - a.level || b.maxLevelNormal - a.maxLevelNormal)
-    .slice(0, 3);
-  if (top.length === 0) return `<span class="muted">–</span>`;
-  return `<span class="skills-cell">${top.map(skillChip).join("")}</span>`;
+  if (!skills || skills.length === 0) return `<span class="muted">–</span>`;
+  const byName = new Map();
+  for (const s of skills) byName.set(s.name, s);
+  const cells = [];
+  for (const name of SKILL_ORDER) cells.push(skillCell(byName.get(name), name, false));
+  for (const name of SKILL_EXTRA) cells.push(skillCell(byName.get(name), name, true));
+  return `<span class="skills-grid">${cells.join("")}</span>`;
 }
 
-function skillChip(s) {
-  // Passion flames: 1 flame for mxn 1-4, 2 flames for mxn 5+.
-  const flames = s.maxLevelNormal >= 5 ? "▲▲" : s.maxLevelNormal >= 1 ? "▲" : "";
-  const label = s.name || `Skill #${s.sk}`;
-  return `<span class="skill-chip" title="${esc(label)} · level ${s.level} (max ${s.maxLevelNormal})">
-    <span class="sk-lvl">${s.level}</span>
-    <span class="passion">${flames}</span>
-  </span>`;
+function skillCell(s, name, extra) {
+  const lvl = s?.level ?? 0;
+  const mxn = s?.maxLevelNormal ?? 0;
+  const flames = mxn >= 5 ? "▲▲" : mxn >= 1 ? "▲" : "";
+  const sev = skillSeverity(lvl);
+  const abbr = SKILL_ABBR[name] || name.slice(0, 3);
+  const title = `${name} · level ${lvl} (max ${mxn})${flames ? ` · passion ${flames}` : ""}`;
+  const cls = `skill-cell s-${sev}${extra ? " extra" : ""}${lvl === 0 ? " zero" : ""}`;
+  const passion = flames ? `<span class="passion">${flames}</span>` : "";
+  return `<span class="${cls}" title="${esc(title)}"><span class="abbr">${abbr}</span><span class="lvl">${lvl}</span>${passion}</span>`;
 }
 
 // ===========================================================================
@@ -360,91 +390,237 @@ function starColor(starClass) {
   }
 }
 
+// Two-mode galaxy: top-level "galaxy" view (one icon per system, with name in
+// screen-space text) and "system" view (zoomed into one system, planets and
+// moons on orbit rings around the star). Click a system to drill in, ESC or
+// back button to return.
+//
+// SVG strategy: a single <svg> in world-space, but the system name labels and
+// the player-ship marker are kept in a second overlay <svg> that uses screen
+// pixels — that way labels don't shrink to nothing when zoomed out.
+
 function renderGalaxy() {
+  if (state.galaxy.focusSystem) renderSystemView();
+  else renderGalaxyMap();
+}
+
+function renderGalaxyMap() {
   const svg = $("galaxy-svg");
+  const overlay = ensureOverlay();
   while (svg.firstChild) svg.removeChild(svg.firstChild);
+  while (overlay.firstChild) overlay.removeChild(overlay.firstChild);
+  ensureBackBtn(false);
   if (!state.snapshot) return;
   const bodies = state.snapshot.bodies || [];
   const ships = state.snapshot.ships || [];
-
   if (bodies.length === 0) return;
 
-  // World-space bounds
-  const xs = bodies.map((b) => b.x);
-  const ys = bodies.map((b) => b.y);
+  // Aggregate bodies by system_id into a single icon per system.
+  const systems = aggregateSystems(bodies);
+  if (systems.length === 0) return;
+
+  // World-space bounds from system center positions.
+  const xs = systems.map((s) => s.x);
+  const ys = systems.map((s) => s.y);
   const minX = Math.min(...xs), maxX = Math.max(...xs);
   const minY = Math.min(...ys), maxY = Math.max(...ys);
-  const padX = Math.max(2000, (maxX - minX) * 0.08);
-  const padY = Math.max(2000, (maxY - minY) * 0.08);
+  const padX = Math.max(20000, (maxX - minX) * 0.08);
+  const padY = Math.max(20000, (maxY - minY) * 0.08);
   const baseW = maxX - minX + padX * 2;
   const baseH = maxY - minY + padY * 2;
   const baseX = minX - padX;
   const baseY = minY - padY;
 
-  // Pan + zoom via viewBox manipulation.
+  // Pan + zoom via viewBox.
   const g = state.galaxy;
   const w = baseW / g.scale;
   const h = baseH / g.scale;
   svg.setAttribute("viewBox", `${baseX + g.tx} ${baseY + g.ty} ${w} ${h}`);
 
-  // Group bodies by system to draw system labels.
-  const bySystem = new Map();
-  for (const b of bodies) {
-    const key = b.system_id || "_";
-    if (!bySystem.has(key)) bySystem.set(key, { name: b.system_name, bodies: [] });
-    bySystem.get(key).bodies.push(b);
-  }
-  for (const [, sys] of bySystem) {
-    if (!sys.name || sys.bodies.length === 0) continue;
-    const sxs = sys.bodies.map((b) => b.x);
-    const sys_x = sxs.reduce((a, b) => a + b, 0) / sxs.length;
-    const sys_y = Math.min(...sys.bodies.map((b) => b.y)) - 1500;
-    const t = document.createElementNS(SVG_NS, "text");
-    t.setAttribute("x", sys_x); t.setAttribute("y", sys_y);
-    t.setAttribute("class", "system-label");
-    t.setAttribute("font-size", 1200);
-    t.textContent = sys.name;
-    svg.appendChild(t);
-  }
+  ensureDefs(svg);
+  drawGrid(svg, baseX, baseY, baseW, baseH);
 
-  // Ship trajectories (background).
+  // Ship trajectories (galaxy-wide, very faint).
+  for (const ship of ships) drawShipPath(svg, ship);
+
+  // System markers (star icon + clickable). Filtered: never-seen systems are
+  // already not in `bodies` because the backend only returns ever-seen ones.
+  for (const sys of systems) drawSystemMarker(svg, sys);
+
+  // Player ship marker(s) — always visible, on top.
   for (const ship of ships) {
-    if (!ship.path || ship.path.length < 2) continue;
-    const d = ship.path
-      .filter((p) => p.x != null && p.y != null)
-      .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`)
-      .join(" ");
-    if (!d) continue;
-    const pathEl = document.createElementNS(SVG_NS, "path");
-    pathEl.setAttribute("d", d);
-    pathEl.setAttribute("class", "ship-path");
-    svg.appendChild(pathEl);
-  }
-
-  // Bodies.
-  for (const b of bodies) {
-    const node = drawBody(b);
-    svg.appendChild(node);
-  }
-
-  // Ships (markers).
-  for (const ship of ships) {
-    const node = drawShip(ship);
+    const node = drawShipWorld(ship);
     if (node) svg.appendChild(node);
   }
+
+  // Screen-space label overlay: system names in fixed pixel size.
+  renderSystemLabels(overlay, systems, svg);
 }
 
-function bodyRadius(b) {
-  switch (b.type) {
-    case "Star": return 1400;
-    case "Planet": return 700;
-    case "Moon": return 320;
-    case "AsteroidField": return 200;
-    default: return 500;
+// Reduce each system's bodies to a single representative position (the star,
+// or fallback to centroid).
+function aggregateSystems(bodies) {
+  const bySystem = new Map();
+  for (const b of bodies) {
+    const key = b.system_id || `_${b.body_id}`;
+    if (!bySystem.has(key)) {
+      bySystem.set(key, {
+        system_id: key,
+        name: b.system_name || "Unknown",
+        bodies: [],
+        star: null,
+        visited: false,
+        anyPresent: false,
+        lastSeenDay: 0,
+      });
+    }
+    const sys = bySystem.get(key);
+    sys.bodies.push(b);
+    if (b.type === "Star") sys.star = b;
+    if (b.visited) sys.visited = true;
+    if (b.present) sys.anyPresent = true;
+    if (b.lastSeenDay > sys.lastSeenDay) sys.lastSeenDay = b.lastSeenDay;
   }
+  const out = [];
+  for (const sys of bySystem.values()) {
+    if (sys.star) {
+      sys.x = sys.star.x;
+      sys.y = sys.star.y;
+      sys.star_class = sys.star.star_class;
+    } else {
+      sys.x = sys.bodies.reduce((s, b) => s + b.x, 0) / sys.bodies.length;
+      sys.y = sys.bodies.reduce((s, b) => s + b.y, 0) / sys.bodies.length;
+      sys.star_class = null;
+    }
+    out.push(sys);
+  }
+  return out;
 }
 
-function drawBody(b) {
+function drawSystemMarker(svg, sys) {
+  const g = document.createElementNS(SVG_NS, "g");
+  const cls = "system" + (sys.anyPresent ? "" : " faded") + (sys.visited ? " visited" : "");
+  g.setAttribute("class", cls);
+  g.setAttribute("data-system-id", sys.system_id);
+
+  // Outer glow halo (large faint circle).
+  const halo = document.createElementNS(SVG_NS, "circle");
+  halo.setAttribute("cx", sys.x);
+  halo.setAttribute("cy", sys.y);
+  halo.setAttribute("r", 4500);
+  halo.setAttribute("fill", starColor(sys.star_class));
+  halo.setAttribute("opacity", 0.15);
+  halo.setAttribute("filter", "url(#glow)");
+  g.appendChild(halo);
+
+  // Star core.
+  const star = document.createElementNS(SVG_NS, "circle");
+  star.setAttribute("cx", sys.x);
+  star.setAttribute("cy", sys.y);
+  star.setAttribute("r", 2200);
+  star.setAttribute("fill", starColor(sys.star_class));
+  star.setAttribute("class", "system-star");
+  g.appendChild(star);
+
+  // Visited ring: thin outline so the eye can spot explored systems.
+  if (sys.visited) {
+    const ring = document.createElementNS(SVG_NS, "circle");
+    ring.setAttribute("cx", sys.x);
+    ring.setAttribute("cy", sys.y);
+    ring.setAttribute("r", 3200);
+    ring.setAttribute("class", "visited-ring");
+    g.appendChild(ring);
+  }
+
+  // Hover + click handlers.
+  g.addEventListener("mouseenter", (ev) => showTooltip(ev, systemTooltip(sys)));
+  g.addEventListener("mousemove", (ev) => moveTooltip(ev));
+  g.addEventListener("mouseleave", hideTooltip);
+  g.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    state.galaxy.focusSystem = sys.system_id;
+    hideTooltip();
+    renderGalaxy();
+  });
+  svg.appendChild(g);
+}
+
+function renderSystemView() {
+  const svg = $("galaxy-svg");
+  const overlay = ensureOverlay();
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  while (overlay.firstChild) overlay.removeChild(overlay.firstChild);
+  ensureBackBtn(true);
+  if (!state.snapshot) return;
+  const bodies = state.snapshot.bodies || [];
+  const sysBodies = bodies.filter((b) => b.system_id === state.galaxy.focusSystem);
+  if (sysBodies.length === 0) {
+    state.galaxy.focusSystem = null;
+    renderGalaxyMap();
+    return;
+  }
+
+  const star = sysBodies.find((b) => b.type === "Star") || sysBodies[0];
+  const cx = star.x;
+  const cy = star.y;
+
+  // Project relative coordinates from star, find max orbital radius for scaling.
+  let maxR = 0;
+  for (const b of sysBodies) {
+    if (b === star) continue;
+    const r = Math.hypot(b.x - cx, b.y - cy);
+    if (r > maxR) maxR = r;
+  }
+  // Synthetic radius for stars with no detected bodies (defensive: shouldn't
+  // happen for the player system, but external systems may have only a star).
+  if (maxR <= 0) maxR = 5000;
+
+  // ViewBox: a square around the star big enough to fit the outermost body.
+  const view = maxR * 2.4;
+  svg.setAttribute("viewBox", `${cx - view / 2} ${cy - view / 2} ${view} ${view}`);
+
+  ensureDefs(svg);
+
+  // Orbit rings: one per unique parent (centerId) body that has orbiters.
+  const orbitersByParent = new Map();
+  for (const b of sysBodies) {
+    if (b === star) continue;
+    const parentId = b.center_id;
+    if (parentId == null) continue;
+    if (!orbitersByParent.has(parentId)) orbitersByParent.set(parentId, []);
+    orbitersByParent.get(parentId).push(b);
+  }
+  for (const [parentId, kids] of orbitersByParent) {
+    const parent = sysBodies.find((b) => String(b.body_id) === String(parentId)) || star;
+    // Group by approximate orbital radius so identical orbits share one ring.
+    for (const kid of kids) {
+      const r = Math.hypot(kid.x - parent.x, kid.y - parent.y);
+      const ring = document.createElementNS(SVG_NS, "circle");
+      ring.setAttribute("cx", parent.x);
+      ring.setAttribute("cy", parent.y);
+      ring.setAttribute("r", r);
+      ring.setAttribute("class", "orbit-ring");
+      svg.appendChild(ring);
+    }
+  }
+
+  // Draw bodies. Star first (so planets render in front of glow).
+  drawSystemBody(svg, star, view);
+  for (const b of sysBodies) {
+    if (b === star) continue;
+    drawSystemBody(svg, b, view);
+  }
+
+  // Screen-space label: system name top-center.
+  const label = document.createElementNS(SVG_NS, "div");
+  label.className = "system-overlay-title";
+  label.textContent = star.system_name || "Unknown system";
+  overlay.appendChild(label);
+}
+
+function drawSystemBody(svg, b, view) {
+  // Body radius scaled to the system viewBox so things stay visible.
+  const r = systemBodyRadius(b, view);
   const g = document.createElementNS(SVG_NS, "g");
   let cls = "body";
   if (b.type === "Star") cls += " star";
@@ -455,15 +631,13 @@ function drawBody(b) {
   g.setAttribute("class", cls);
 
   if (b.type === "AsteroidField") {
-    // Draw a scatter of small dots.
-    for (let i = 0; i < 8; i++) {
-      const r = bodyRadius(b);
-      const dx = (Math.sin(i * 7 + Number(b.body_id)) * r);
-      const dy = (Math.cos(i * 11 + Number(b.body_id)) * r);
+    for (let i = 0; i < 10; i++) {
+      const dx = Math.sin(i * 7 + Number(b.body_id)) * r;
+      const dy = Math.cos(i * 11 + Number(b.body_id)) * r;
       const c = document.createElementNS(SVG_NS, "circle");
       c.setAttribute("cx", b.x + dx);
       c.setAttribute("cy", b.y + dy);
-      c.setAttribute("r", 70);
+      c.setAttribute("r", r * 0.18);
       c.setAttribute("fill", "#a89a82");
       g.appendChild(c);
     }
@@ -471,7 +645,7 @@ function drawBody(b) {
     const c = document.createElementNS(SVG_NS, "circle");
     c.setAttribute("cx", b.x);
     c.setAttribute("cy", b.y);
-    c.setAttribute("r", bodyRadius(b));
+    c.setAttribute("r", r);
     if (b.type === "Star") {
       c.setAttribute("fill", starColor(b.star_class));
       c.setAttribute("filter", "url(#glow)");
@@ -481,36 +655,158 @@ function drawBody(b) {
       c.setAttribute("fill", "#a8b0c4");
     }
     g.appendChild(c);
-
-    if (b.type === "Star" && b.system_name) {
-      // System name as label on star
-    }
   }
 
-  // Hover tooltip
   g.addEventListener("mouseenter", (ev) => showTooltip(ev, bodyTooltip(b)));
   g.addEventListener("mousemove", (ev) => moveTooltip(ev));
   g.addEventListener("mouseleave", hideTooltip);
-
-  return g;
+  svg.appendChild(g);
 }
 
-function drawShip(ship) {
+function systemBodyRadius(b, view) {
+  // Sizes proportional to the system viewBox so bodies are visible regardless
+  // of how spread out the system is. Asteroid fields use the returned r as
+  // the scatter radius, not a draw radius.
+  const base = view * 0.025;
+  switch (b.type) {
+    case "Star": return base * 1.7;
+    case "Planet": return base * 0.9;
+    case "Moon": return base * 0.45;
+    case "AsteroidField": return base * 0.7;
+    default: return base * 0.6;
+  }
+}
+
+// Defs are idempotent — only inserted once.
+function ensureDefs(svg) {
+  if (svg.querySelector("defs")) return;
+  const defs = document.createElementNS(SVG_NS, "defs");
+  defs.innerHTML = `
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="800" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  `;
+  svg.appendChild(defs);
+}
+
+// Subtle grid in galaxy view so the eye gets a sense of scale.
+function drawGrid(svg, baseX, baseY, baseW, baseH) {
+  const step = 100000;
+  const x0 = Math.floor(baseX / step) * step;
+  const y0 = Math.floor(baseY / step) * step;
+  for (let x = x0; x <= baseX + baseW; x += step) {
+    const line = document.createElementNS(SVG_NS, "line");
+    line.setAttribute("x1", x); line.setAttribute("y1", baseY);
+    line.setAttribute("x2", x); line.setAttribute("y2", baseY + baseH);
+    line.setAttribute("class", "grid-line");
+    svg.appendChild(line);
+  }
+  for (let y = y0; y <= baseY + baseH; y += step) {
+    const line = document.createElementNS(SVG_NS, "line");
+    line.setAttribute("x1", baseX); line.setAttribute("y1", y);
+    line.setAttribute("x2", baseX + baseW); line.setAttribute("y2", y);
+    line.setAttribute("class", "grid-line");
+    svg.appendChild(line);
+  }
+}
+
+function drawShipPath(svg, ship) {
+  if (!ship.path || ship.path.length < 2) return;
+  const d = ship.path
+    .filter((p) => p.x != null && p.y != null)
+    .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`)
+    .join(" ");
+  if (!d) return;
+  const pathEl = document.createElementNS(SVG_NS, "path");
+  pathEl.setAttribute("d", d);
+  pathEl.setAttribute("class", "ship-path");
+  svg.appendChild(pathEl);
+}
+
+function drawShipWorld(ship) {
   const last = ship.path?.[ship.path.length - 1];
   if (!last || last.x == null || last.y == null) return null;
   const g = document.createElementNS(SVG_NS, "g");
   g.setAttribute("class", "ship" + (ship.present ? "" : " faded"));
   const tri = document.createElementNS(SVG_NS, "polygon");
-  const r = 400;
-  tri.setAttribute("points", `${last.x},${last.y - r} ${last.x - r},${last.y + r * 0.7} ${last.x + r},${last.y + r * 0.7}`);
+  const r = 2400;
+  tri.setAttribute("points", `${last.x},${last.y - r} ${last.x - r * 0.85},${last.y + r * 0.7} ${last.x + r * 0.85},${last.y + r * 0.7}`);
   tri.setAttribute("fill", factionColor(ship.faction_id));
-  tri.setAttribute("stroke", "#000");
-  tri.setAttribute("stroke-width", 40);
+  tri.setAttribute("stroke", "#fff");
+  tri.setAttribute("stroke-width", 180);
   g.appendChild(tri);
   g.addEventListener("mouseenter", (ev) => showTooltip(ev, shipTooltip(ship)));
   g.addEventListener("mousemove", (ev) => moveTooltip(ev));
   g.addEventListener("mouseleave", hideTooltip);
   return g;
+}
+
+// Screen-space label overlay. Reads the SVG viewBox + bounding rect so labels
+// land directly under each system marker in pixel space.
+function renderSystemLabels(overlay, systems, svg) {
+  const vb = svg.viewBox.baseVal;
+  const rect = svg.getBoundingClientRect();
+  const wrapRect = $("galaxy-canvas-wrap").getBoundingClientRect();
+  if (!vb.width || !vb.height || !rect.width) return;
+  // Same fit math as preserveAspectRatio="xMidYMid meet": find the scale that
+  // makes the viewBox fit inside the SVG client rect, then center it.
+  const scale = Math.min(rect.width / vb.width, rect.height / vb.height);
+  const drawnW = vb.width * scale;
+  const drawnH = vb.height * scale;
+  const offX = rect.left - wrapRect.left + (rect.width - drawnW) / 2;
+  const offY = rect.top - wrapRect.top + (rect.height - drawnH) / 2;
+  for (const sys of systems) {
+    const sx = offX + (sys.x - vb.x) * scale;
+    const sy = offY + (sys.y - vb.y) * scale;
+    const label = document.createElement("div");
+    label.className = "system-label-overlay" + (sys.anyPresent ? "" : " faded");
+    label.style.left = sx + "px";
+    label.style.top = (sy + 18) + "px";
+    label.textContent = sys.name;
+    overlay.appendChild(label);
+  }
+}
+
+function ensureOverlay() {
+  let overlay = document.getElementById("galaxy-overlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "galaxy-overlay";
+    $("galaxy-canvas-wrap").appendChild(overlay);
+  }
+  return overlay;
+}
+
+function ensureBackBtn(visible) {
+  let btn = document.getElementById("galaxy-back");
+  if (!btn) {
+    btn = document.createElement("button");
+    btn.id = "galaxy-back";
+    btn.textContent = "← Galaxy";
+    btn.addEventListener("click", () => {
+      state.galaxy.focusSystem = null;
+      renderGalaxy();
+    });
+    $("galaxy-canvas-wrap").appendChild(btn);
+  }
+  btn.style.display = visible ? "" : "none";
+}
+
+function systemTooltip(sys) {
+  const visibleBodies = sys.bodies.filter((b) => b.present);
+  const lines = [
+    `<strong>${esc(sys.name)}</strong>`,
+    sys.star_class ? `star class: ${esc(sys.star_class)}` : null,
+    `bodies: ${visibleBodies.length}/${sys.bodies.length} visible`,
+    sys.visited ? "<em>visited</em>" : null,
+    sys.anyPresent ? null : `<em>last seen day ${sys.lastSeenDay}</em>`,
+    `<span class="hint">click to enter system</span>`,
+  ].filter(Boolean);
+  return lines.join("<br>");
 }
 
 function factionColor(factionId) {
@@ -566,37 +862,72 @@ function hideTooltip() {
 }
 
 // ----- Galaxy pan + zoom -----
+// Wheel zoom is centered on the cursor (not on 0,0): convert mouse to current
+// world-space, scale, then shift translation so that world point still lives
+// under the cursor after the zoom.
 const svg = $("galaxy-svg");
 svg.addEventListener("wheel", (ev) => {
+  if (state.galaxy.focusSystem) return; // system view is auto-fit, no zoom
   ev.preventDefault();
+  const vb = svg.viewBox.baseVal;
+  const rect = svg.getBoundingClientRect();
+  if (!vb.width || !rect.width) return;
+  const cursorX = vb.x + (ev.clientX - rect.left) * (vb.width / rect.width);
+  const cursorY = vb.y + (ev.clientY - rect.top) * (vb.height / rect.height);
   const factor = ev.deltaY > 0 ? 1.2 : 1 / 1.2;
-  state.galaxy.scale *= factor;
-  state.galaxy.scale = Math.max(0.5, Math.min(60, state.galaxy.scale));
+  const prev = state.galaxy.scale;
+  state.galaxy.scale = Math.max(0.5, Math.min(60, state.galaxy.scale * factor));
+  const realFactor = state.galaxy.scale / prev;
+  // The new viewBox width = vb.width / realFactor. Adjust tx, ty so cursor
+  // world position stays put.
+  const newW = vb.width / realFactor;
+  const newH = vb.height / realFactor;
+  const newX = cursorX - (ev.clientX - rect.left) * (newW / rect.width);
+  const newY = cursorY - (ev.clientY - rect.top) * (newH / rect.height);
+  // tx/ty are offsets from baseX/baseY; recompute by deriving baseX/baseY.
+  // We know vb.x = baseX + tx (old). Easier: store tx as absolute delta from
+  // baseX. We didn't track baseX globally, so recompute by re-running render
+  // with adjusted scale + a translation correction relative to old viewBox.
+  state.galaxy.tx += newX - vb.x;
+  state.galaxy.ty += newY - vb.y;
   renderGalaxy();
 }, { passive: false });
 
 svg.addEventListener("mousedown", (ev) => {
   if (ev.button !== 0) return;
-  state.galaxy.drag = { x: ev.clientX, y: ev.clientY, tx0: state.galaxy.tx, ty0: state.galaxy.ty };
+  if (state.galaxy.focusSystem) return; // no drag in system view
+  state.galaxy.drag = { x: ev.clientX, y: ev.clientY, tx0: state.galaxy.tx, ty0: state.galaxy.ty, moved: false };
   svg.classList.add("dragging");
 });
 window.addEventListener("mousemove", (ev) => {
   if (!state.galaxy.drag) return;
   const rect = svg.getBoundingClientRect();
-  if (!state.snapshot?.bodies?.length) return;
-  const xs = state.snapshot.bodies.map((b) => b.x);
-  const ys = state.snapshot.bodies.map((b) => b.y);
-  const baseW = (Math.max(...xs) - Math.min(...xs)) || 1;
-  const baseH = (Math.max(...ys) - Math.min(...ys)) || 1;
-  const dx = (ev.clientX - state.galaxy.drag.x) * baseW / rect.width / state.galaxy.scale;
-  const dy = (ev.clientY - state.galaxy.drag.y) * baseH / rect.height / state.galaxy.scale;
+  const vb = svg.viewBox.baseVal;
+  if (!vb.width) return;
+  const dx = (ev.clientX - state.galaxy.drag.x) * (vb.width / rect.width);
+  const dy = (ev.clientY - state.galaxy.drag.y) * (vb.height / rect.height);
+  if (Math.abs(ev.clientX - state.galaxy.drag.x) + Math.abs(ev.clientY - state.galaxy.drag.y) > 3) {
+    state.galaxy.drag.moved = true;
+  }
   state.galaxy.tx = state.galaxy.drag.tx0 - dx;
   state.galaxy.ty = state.galaxy.drag.ty0 - dy;
   renderGalaxy();
 });
 window.addEventListener("mouseup", () => {
-  state.galaxy.drag = null;
+  // Swallow a click that came after a drag so we don't accidentally enter a
+  // system on pan-release.
+  if (state.galaxy.drag?.moved) {
+    setTimeout(() => { state.galaxy.drag = null; }, 0);
+  } else {
+    state.galaxy.drag = null;
+  }
   svg.classList.remove("dragging");
+});
+window.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape" && state.galaxy.focusSystem) {
+    state.galaxy.focusSystem = null;
+    renderGalaxy();
+  }
 });
 
 // ===========================================================================
