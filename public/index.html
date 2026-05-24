@@ -9,7 +9,8 @@
   <header>
     <h1>Space Haven Dashboard</h1>
     <nav>
-      <button data-view="crew" class="active">Crew</button>
+      <button data-view="status" class="active">Status</button>
+      <button data-view="skills">Skills</button>
       <button data-view="nutrition">Nutrition</button>
       <button data-view="galaxy">Galaxy</button>
     </nav>
@@ -21,8 +22,8 @@
 
   <main>
 
-    <!-- ====== CREW VIEW ====== -->
-    <section id="view-crew" class="view active">
+    <!-- ====== STATUS VIEW ====== -->
+    <section id="view-status" class="view active">
       <div class="toolbar">
         <label class="toggle">
           <input type="checkbox" id="needs-attention"> needs attention only
@@ -40,12 +41,27 @@
               <th data-sort="rest">Rest</th>
               <th data-sort="comfort">Comfort</th>
               <th data-sort="oxygen">O₂</th>
+              <th data-sort="temperature">Temp</th>
               <th>Conditions</th>
-              <th>Skills</th>
-              <th data-sort="task">Task</th>
             </tr>
           </thead>
-          <tbody id="crew-body"></tbody>
+          <tbody id="status-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ====== SKILLS VIEW ====== -->
+    <section id="view-skills" class="view">
+      <div class="toolbar">
+        <span class="muted" id="skills-count"></span>
+        <a href="#" id="skills-reset" class="reset-sort" hidden>Reset sort</a>
+      </div>
+      <div class="table-wrap">
+        <table class="crew-table skills-table">
+          <thead>
+            <tr id="skills-head"></tr>
+          </thead>
+          <tbody id="skills-body"></tbody>
         </table>
       </div>
     </section>

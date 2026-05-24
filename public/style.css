@@ -195,55 +195,107 @@ main { height: calc(100% - 44px); }
 .cond.active.s-extreme { background: var(--extreme); }
 .cond.active.s-happy   { background: var(--happy); }
 
-/* Full 12-skill grid (+ Maintenance/Logistics tucked after a divider). Each
-   cell shows a 3-letter abbreviation + level, colored by level severity.
-   Same six bands as stats but inverted: 0 = neutral, high = happy. */
-.skills-grid {
-  display: inline-flex;
-  flex-wrap: nowrap;
-  gap: 2px;
-  align-items: center;
-  font-variant-numeric: tabular-nums;
+/* Status tab: name cell can carry a small task subtitle. */
+.crew-table td.name .sub {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  font-weight: 400;
+  margin-top: -1px;
 }
-.skill-cell {
-  display: inline-flex; align-items: center; gap: 3px;
-  padding: 1px 4px;
-  border-radius: 3px;
+
+/* ====================================================================
+   SKILLS TABLE
+   ==================================================================== */
+.skills-table th.attr-col,
+.skills-table td.attr-col {
+  width: 32px;
+  text-align: center;
+  padding: 0 2px;
+}
+.skills-table th.skill-col,
+.skills-table td.skill-col {
+  width: 40px;
+  text-align: center;
+  padding: 0 2px;
+}
+.skills-table th.skill-extra,
+.skills-table td.skill-extra {
+  border-left: 1px dashed var(--border);
+}
+.skills-table th .sort-ind {
+  margin-left: 2px;
+  color: var(--accent);
+  font-size: 0.7rem;
+}
+.skills-table th .sort-ind sup {
+  font-size: 0.6rem;
+  margin-left: 1px;
+}
+.skills-table th.sort-active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.skills-table .traits-col {
+  max-width: 220px;
+  white-space: normal;
   font-size: 0.72rem;
-  line-height: 1.4;
+  line-height: 1.3;
+}
+.trait-chip {
+  display: inline-block;
+  padding: 0 0.35rem;
+  margin: 1px 1px;
   background: var(--bg-3);
   border: 1px solid var(--border);
-  cursor: help;
-  position: relative;
-}
-.skill-cell.zero { opacity: 0.45; }
-.skill-cell .abbr {
+  border-radius: 8px;
   color: var(--text-dim);
-  font-weight: 500;
-  letter-spacing: 0.2px;
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+/* Reset-sort link, shown only when a sort is active. */
+.reset-sort {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.78rem;
+  border: 1px solid var(--accent-dim);
+  padding: 0.1rem 0.5rem;
+  border-radius: 3px;
+}
+.reset-sort:hover { background: var(--bg-3); }
+
+/* Vertical tally-bar skill cell (replaces the old chip rendering). All bars
+   are equal height; filled vs empty is shown by color, not height — matches
+   the in-game look. */
+.skill-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: help;
 }
 .skill-cell .lvl {
-  color: var(--text);
-  font-weight: 600;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
+  min-width: 12px;
+  color: var(--text);
 }
-.skill-cell.s-extreme { border-color: var(--extreme); }
-.skill-cell.s-major   { border-color: var(--major); }
-.skill-cell.s-minor   .lvl { color: var(--minor); }
-.skill-cell.s-content { border-color: var(--content); }
-.skill-cell.s-content .lvl { color: var(--content); }
-.skill-cell.s-happy   { border-color: var(--happy); }
-.skill-cell.s-happy   .lvl { color: var(--happy); }
-.skill-cell.extra {
-  opacity: 0.6;
-  border-style: dashed;
+.skill-cell.zero .lvl { color: var(--text-dim); opacity: 0.6; }
+.skill-cell .bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 14px;
 }
-.skill-cell .passion {
-  color: var(--major);
-  font-size: 0.65rem;
-  letter-spacing: -1px;
-  margin-left: 2px;
+.skill-cell .bar {
+  width: 3px;
+  height: 14px;
+  background: #2a2a2a;
 }
+.skill-cell .bar.empty   { background: #2a2a2a; }
+.skill-cell .bar.filled  { background: var(--content); }
+.skill-cell .bar.passion { background: #f39c12; }
+.skill-cell .bar.filled.passion { background: #e67e22; }
 
 /* ====================================================================
    NUTRITION VIEW

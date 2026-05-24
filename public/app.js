@@ -27,28 +27,31 @@ const state = {
   galaxy: { scale: 1, tx: 0, ty: 0, drag: null, focusSystem: null },
 };
 
-// In-game skill order (12 visible + 2 hidden). Names mirror the game's UI.
-const SKILL_ORDER = [
-  "Mining", "Construct", "Industry", "Botany",
-  "Medical", "Research", "Weapons", "Navigation",
-  "Gunner", "Shielding", "Operations", "Piloting",
+// In-game skill order (12 visible + 2 hidden), with sk numeric ids from the
+// save file. Maintenance/Logistics (12/13) are not in the standard panel.
+const SKILL_COLUMNS = [
+  { sk: 2,  name: "Mining",      abbr: "Min" },
+  { sk: 4,  name: "Construct",   abbr: "Con" },
+  { sk: 5,  name: "Industry",    abbr: "Ind" },
+  { sk: 3,  name: "Botany",      abbr: "Bot" },
+  { sk: 6,  name: "Medical",     abbr: "Med" },
+  { sk: 16, name: "Research",    abbr: "Res" },
+  { sk: 10, name: "Weapons",     abbr: "Wep" },
+  { sk: 14, name: "Navigation",  abbr: "Nav" },
+  { sk: 7,  name: "Gunner",      abbr: "Gun" },
+  { sk: 8,  name: "Shielding",   abbr: "Shi" },
+  { sk: 9,  name: "Operations",  abbr: "Ops" },
+  { sk: 22, name: "Piloting",    abbr: "Pil" },
+  { sk: 12, name: "Maintenance", abbr: "Mai", extra: true },
+  { sk: 13, name: "Logistics",   abbr: "Log", extra: true },
 ];
-const SKILL_EXTRA = ["Maintenance", "Logistics"];
-const SKILL_ABBR = {
-  Mining: "Min", Construct: "Con", Industry: "Ind", Botany: "Bot",
-  Medical: "Med", Research: "Res", Weapons: "Wpn", Navigation: "Nav",
-  Gunner: "Gun", Shielding: "Shd", Operations: "Ops", Piloting: "Pil",
-  Maintenance: "Mnt", Logistics: "Log",
-};
 
-// Level → severity band (inverted: high level = happy/green, 0 = neutral gray).
-function skillSeverity(level) {
-  if (level <= 0) return "neutral";
-  if (level <= 2) return "minor";
-  if (level <= 4) return "content";
-  if (level <= 7) return "happy";
-  return "happy";
-}
+const ATTR_COLUMNS = [
+  { key: "bravery",      name: "Bravery",      abbr: "Bra" },
+  { key: "zest",         name: "Zest",         abbr: "Zes" },
+  { key: "intelligence", name: "Intelligence", abbr: "Int" },
+  { key: "perception",   name: "Perception",   abbr: "Per" },
+];
 
 // ---------------------------------------------------------------------------
 //  Severity bands (six discrete buckets, applied uniformly across stats).
@@ -102,7 +105,8 @@ document.querySelectorAll("header nav button").forEach((btn) => {
     btn.classList.add("active");
     $("view-" + btn.dataset.view).classList.add("active");
     // Some views render on demand
-    if (btn.dataset.view === "crew") renderCrew();
+    if (btn.dataset.view === "status") renderStatus();
+    else if (btn.dataset.view === "skills") renderSkills();
     else if (btn.dataset.view === "nutrition") renderNutrition();
     else if (btn.dataset.view === "galaxy") renderGalaxy();
   });
@@ -140,7 +144,8 @@ async function loadSnapshot(day) {
   // Re-render whichever view is active
   const active = document.querySelector(".view.active");
   if (!active) return;
-  if (active.id === "view-crew") renderCrew();
+  if (active.id === "view-status") renderStatus();
+  else if (active.id === "view-skills") renderSkills();
   else if (active.id === "view-nutrition") renderNutrition();
   else if (active.id === "view-galaxy") renderGalaxy();
 }
@@ -168,28 +173,28 @@ async function renderTickMarks() {
 }
 
 // ===========================================================================
-//  CREW VIEW
+//  STATUS VIEW (mood/vitals/conditions)
 // ===========================================================================
 
-document.querySelectorAll(".crew-table th[data-sort]").forEach((th) => {
+document.querySelectorAll("#view-status .crew-table th[data-sort]").forEach((th) => {
   th.addEventListener("click", () => {
     const k = th.dataset.sort;
     if (state.sortKey === k) state.sortAsc = !state.sortAsc;
     else { state.sortKey = k; state.sortAsc = true; }
-    renderCrew();
+    renderStatus();
   });
 });
 $("needs-attention").addEventListener("change", (e) => {
   state.needsAttentionOnly = e.target.checked;
-  renderCrew();
+  renderStatus();
 });
 
-function renderCrew() {
+function renderStatus() {
   if (!state.snapshot) return;
   const crew = state.snapshot.crew || [];
 
   // Highlight the active sort header
-  document.querySelectorAll(".crew-table th").forEach((th) => {
+  document.querySelectorAll("#view-status .crew-table th").forEach((th) => {
     th.classList.toggle("sort-active", th.dataset.sort === state.sortKey);
     th.classList.toggle("asc", state.sortAsc);
   });
@@ -212,10 +217,10 @@ function renderCrew() {
   });
 
   $("crew-count").textContent = `${rows.length} / ${crew.length} crew`;
-  $("crew-body").innerHTML = rows.map(crewRow).join("");
+  $("status-body").innerHTML = rows.map(statusRow).join("");
 
   // Tooltip handlers on condition icons
-  document.querySelectorAll(".cond[data-tip]").forEach((el) => {
+  document.querySelectorAll("#status-body .cond[data-tip]").forEach((el) => {
     el.addEventListener("mouseenter", (ev) => showTooltip(ev, el.dataset.tip));
     el.addEventListener("mouseleave", hideTooltip);
     el.addEventListener("mousemove", (ev) => moveTooltip(ev));
@@ -228,21 +233,20 @@ function needsAttention(c) {
     || severity("mood", c.mood) === "major" && (c.food ?? 100) < 30;
 }
 
-function crewRow(c) {
+function statusRow(c) {
   const attn = needsAttention(c) ? " attention" : "";
   const conditions = conditionStrip(c.conditions || []);
-  const topSkills = topSkillsCell(c.skills || []);
+  const task = c.task ? `<span class="sub">${esc(c.task)}</span>` : "";
   return `<tr class="${attn.trim()}">
-    <td class="name">${esc(c.name || c.cid)}</td>
+    <td class="name">${esc(c.name || c.cid)}${task}</td>
     ${statCell("mood", c.mood, c.mood_long)}
     ${statCell("health", c.health, c.health_long)}
     ${statCell("food", c.food, c.food_long)}
     ${statCell("rest", c.rest, c.rest_long)}
     ${statCell("comfort", c.comfort, c.comfort_long)}
     ${statCell("oxygen", c.oxygen, null)}
+    ${statCell("temperature", c.temperature, null)}
     <td>${conditions}</td>
-    <td>${topSkills}</td>
-    <td class="muted">${esc(c.task || "")}</td>
   </tr>`;
 }
 
@@ -278,30 +282,175 @@ function conditionStrip(conditions) {
   return `<span class="cond-strip">${slots.join("")}</span>`;
 }
 
-// Render all 12 in-game skills as a labeled mini-grid, with Maintenance &
-// Logistics tucked at the end. Each cell shows a 3-letter abbreviation + level
-// number, colored by level (gray=0, green=high). Full name + max-natural-level
-// + passion flames live in the hover tooltip so glance-readability stays high.
-function topSkillsCell(skills) {
-  if (!skills || skills.length === 0) return `<span class="muted">–</span>`;
-  const byName = new Map();
-  for (const s of skills) byName.set(s.name, s);
-  const cells = [];
-  for (const name of SKILL_ORDER) cells.push(skillCell(byName.get(name), name, false));
-  for (const name of SKILL_EXTRA) cells.push(skillCell(byName.get(name), name, true));
-  return `<span class="skills-grid">${cells.join("")}</span>`;
+// ===========================================================================
+//  SKILLS VIEW (traits + attributes + 14 skill columns, multi-sort)
+// ===========================================================================
+
+// Module-level sort state. Each entry: { key, direction }
+// key ∈ { 'name', 'bravery', 'zest', 'intelligence', 'perception', <sk:number> }
+let skillSort = [];
+
+function renderSkills() {
+  if (!state.snapshot) return;
+  const crew = state.snapshot.crew || [];
+
+  // Build header row from spec.
+  const head = $("skills-head");
+  const headCells = [];
+  headCells.push(skillHeaderCell("name", "Name", false));
+  headCells.push(`<th class="traits-col">Traits</th>`);
+  for (const a of ATTR_COLUMNS) {
+    headCells.push(skillHeaderCell(a.key, a.abbr, false, a.name, "attr-col"));
+  }
+  for (const c of SKILL_COLUMNS) {
+    const cls = "skill-col" + (c.extra ? " skill-extra" : "");
+    headCells.push(skillHeaderCell(c.sk, c.abbr, true, c.name, cls));
+  }
+  head.innerHTML = headCells.join("");
+
+  // Wire header click handlers (rebuilt each render).
+  head.querySelectorAll("th[data-sort-key]").forEach((th) => {
+    th.addEventListener("click", (ev) => {
+      const raw = th.dataset.sortKey;
+      const key = /^\d+$/.test(raw) ? Number(raw) : raw;
+      toggleSkillSort(key, ev.shiftKey);
+      renderSkills();
+    });
+  });
+
+  // Reset link.
+  const reset = $("skills-reset");
+  reset.hidden = skillSort.length === 0;
+  reset.onclick = (ev) => {
+    ev.preventDefault();
+    skillSort = [];
+    renderSkills();
+  };
+
+  const rows = sortCrewForSkills(crew);
+  $("skills-count").textContent = `${rows.length} crew`;
+  $("skills-body").innerHTML = rows.map(skillRow).join("");
 }
 
-function skillCell(s, name, extra) {
+function skillHeaderCell(key, label, isSkill, fullName, extraCls) {
+  const idx = skillSort.findIndex((s) => s.key === key);
+  let indicator = "";
+  if (idx >= 0) {
+    const dir = skillSort[idx].direction;
+    const arrow = dir === "desc" ? "▼" : "▲";
+    const sup = skillSort.length > 1 ? `<sup>${idx + 1}</sup>` : "";
+    indicator = `<span class="sort-ind">${arrow}${sup}</span>`;
+  }
+  const cls = (extraCls || "") + (idx >= 0 ? " sort-active" : "");
+  const title = fullName ? ` title="${esc(fullName)}"` : "";
+  return `<th class="${cls}" data-sort-key="${key}"${title}>${esc(label)}${indicator}</th>`;
+}
+
+function toggleSkillSort(key, additive) {
+  const idx = skillSort.findIndex((s) => s.key === key);
+  if (!additive) {
+    if (idx === -1) {
+      skillSort = [{ key, direction: "desc" }];
+    } else if (skillSort.length === 1) {
+      // Cycle: desc → asc → remove
+      const cur = skillSort[0];
+      if (cur.direction === "desc") skillSort = [{ key, direction: "asc" }];
+      else skillSort = [];
+    } else {
+      // Multiple sorts active, plain-click on one resets to single desc.
+      skillSort = [{ key, direction: "desc" }];
+    }
+    return;
+  }
+  // Shift-click: add tiebreaker, or cycle the existing tiebreaker.
+  if (idx === -1) {
+    skillSort.push({ key, direction: "desc" });
+  } else {
+    const cur = skillSort[idx];
+    if (cur.direction === "desc") cur.direction = "asc";
+    else skillSort.splice(idx, 1);
+  }
+}
+
+function getSortValue(c, key) {
+  if (key === "name") return (c.name || c.cid || "").toString().toLowerCase();
+  if (typeof key === "string") {
+    // attribute: lookup by name (capitalized)
+    const want = key.charAt(0).toUpperCase() + key.slice(1);
+    const a = (c.attributes || []).find((x) => x.name === want);
+    return a?.points ?? 0;
+  }
+  // numeric: skill sk id
+  const s = (c.skills || []).find((x) => x.sk === key);
+  return s?.level ?? 0;
+}
+
+function sortCrewForSkills(crew) {
+  if (skillSort.length === 0) return crew;
+  return [...crew].sort((a, b) => {
+    for (const { key, direction } of skillSort) {
+      const av = getSortValue(a, key);
+      const bv = getSortValue(b, key);
+      if (av < bv) return direction === "desc" ? 1 : -1;
+      if (av > bv) return direction === "desc" ? -1 : 1;
+    }
+    return 0;
+  });
+}
+
+function skillRow(c) {
+  const tds = [];
+  tds.push(`<td class="name">${esc(c.name || c.cid)}</td>`);
+  tds.push(`<td class="traits-col">${traitsCell(c.traits || [])}</td>`);
+  for (const a of ATTR_COLUMNS) {
+    const want = a.key.charAt(0).toUpperCase() + a.key.slice(1);
+    const attr = (c.attributes || []).find((x) => x.name === want);
+    const pts = attr?.points ?? 0;
+    tds.push(`<td class="attr-col num">${pts}</td>`);
+  }
+  const skillsBySk = new Map();
+  for (const s of c.skills || []) skillsBySk.set(s.sk, s);
+  for (const col of SKILL_COLUMNS) {
+    const cls = "skill-col" + (col.extra ? " skill-extra" : "");
+    tds.push(`<td class="${cls}">${skillTallyCell(skillsBySk.get(col.sk), col.name)}</td>`);
+  }
+  return `<tr>${tds.join("")}</tr>`;
+}
+
+function traitsCell(traits) {
+  if (!traits || traits.length === 0) return `<span class="muted">–</span>`;
+  return traits
+    .map((t) => `<span class="trait-chip" title="${esc(t.name || ("#" + t.id))}">${esc(t.name || ("#" + t.id))}</span>`)
+    .join(" ");
+}
+
+// Vertical tally-bar skill cell. One <span class="bar"> per slot up to
+// max(maxLevelNormal, maxLevelPassion, level, 1). Color encodes filled/empty/
+// passion-potential/filled-passion.
+function skillTallyCell(s, name) {
   const lvl = s?.level ?? 0;
   const mxn = s?.maxLevelNormal ?? 0;
-  const flames = mxn >= 5 ? "▲▲" : mxn >= 1 ? "▲" : "";
-  const sev = skillSeverity(lvl);
-  const abbr = SKILL_ABBR[name] || name.slice(0, 3);
-  const title = `${name} · level ${lvl} (max ${mxn})${flames ? ` · passion ${flames}` : ""}`;
-  const cls = `skill-cell s-${sev}${extra ? " extra" : ""}${lvl === 0 ? " zero" : ""}`;
-  const passion = flames ? `<span class="passion">${flames}</span>` : "";
-  return `<span class="${cls}" title="${esc(title)}"><span class="abbr">${abbr}</span><span class="lvl">${lvl}</span>${passion}</span>`;
+  const mxp = s?.maxLevelPassion ?? 0;
+  const slots = Math.max(mxn, mxp, lvl, 1);
+  const bars = [];
+  for (let i = 0; i < slots; i++) {
+    let cls = "bar";
+    if (i < lvl) {
+      // filled — but if beyond mxn it's a passion-filled
+      if (i >= mxn) cls += " filled passion";
+      else cls += " filled";
+    } else if (i < mxn) {
+      cls += " empty";
+    } else if (i < mxp) {
+      cls += " passion";
+    } else {
+      cls += " empty";
+    }
+    bars.push(`<span class="${cls}"></span>`);
+  }
+  const title = `${name} · level ${lvl} / max ${mxn}${mxp > mxn ? ` (passion ${mxp})` : ""}`;
+  const zeroCls = lvl === 0 ? " zero" : "";
+  return `<span class="skill-cell${zeroCls}" title="${esc(title)}"><span class="lvl">${lvl}</span><span class="bars">${bars.join("")}</span></span>`;
 }
 
 // ===========================================================================
