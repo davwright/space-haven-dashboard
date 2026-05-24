@@ -133,4 +133,9 @@ ensureColumn("body_observations", "star_type", "TEXT");
 ensureColumn("body_observations", "star_class", "TEXT");
 ensureColumn("body_observations", "center_id", "TEXT");
 
+// Player ship galaxy position per snapshot (for the trail polyline + camera).
+ensureColumn("snapshots", "player_ship_x", "INTEGER");
+ensureColumn("snapshots", "player_ship_y", "INTEGER");
+ensureColumn("snapshots", "player_system_id", "TEXT");
+
 module.exports = db;

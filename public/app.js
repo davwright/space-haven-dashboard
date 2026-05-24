@@ -24,7 +24,17 @@ const state = {
   sortAsc: true,
   needsAttentionOnly: false,
   hungerOnly: false,
-  galaxy: { scale: 1, tx: 0, ty: 0, drag: null, focusSystem: null },
+  galaxy: {
+    scale: 1, tx: 0, ty: 0, drag: null, focusSystem: null,
+    // Player ship galaxy path (cached: fetched once per page load / SSE push).
+    shipPath: null,
+    // viewBox center the renderer should produce on the next paint, plus the
+    // currently-animating-toward viewBox for the camera-follow animation.
+    cameraTarget: null,
+    cameraAnim: null,
+    // setTimeout id for the "slider idle → auto-zoom into current system".
+    autoZoomTimer: null,
+  },
 };
 
 // In-game skill order (12 visible + 2 hidden), with sk numeric ids from the
@@ -553,6 +563,19 @@ function renderGalaxy() {
   else renderGalaxyMap();
 }
 
+// One-shot fetch of the player ship's per-snapshot galaxy positions. Cached
+// for the page lifetime and refreshed by the SSE snapshot handler.
+async function ensureShipPath() {
+  if (state.galaxy.shipPath != null) return state.galaxy.shipPath;
+  try {
+    const r = await fetch("/history/player-path");
+    state.galaxy.shipPath = r.ok ? await r.json() : [];
+  } catch {
+    state.galaxy.shipPath = [];
+  }
+  return state.galaxy.shipPath;
+}
+
 function renderGalaxyMap() {
   const svg = $("galaxy-svg");
   const overlay = ensureOverlay();
@@ -560,23 +583,39 @@ function renderGalaxyMap() {
   while (overlay.firstChild) overlay.removeChild(overlay.firstChild);
   ensureBackBtn(false);
   if (!state.snapshot) return;
+  // Kick off the path fetch on first render. Returns immediately if cached.
+  if (state.galaxy.shipPath == null) {
+    ensureShipPath().then(() => {
+      if (!state.galaxy.focusSystem) renderGalaxyMap();
+    });
+  }
   const bodies = state.snapshot.bodies || [];
   const ships = state.snapshot.ships || [];
   if (bodies.length === 0) return;
 
-  // Aggregate bodies by system_id into a single icon per system.
-  const systems = aggregateSystems(bodies);
+  // Aggregate bodies by system_id, then drop any system that has no visited
+  // body. "Visited" = at least one body in the system has `visited` truthy.
+  const allSystems = aggregateSystems(bodies);
+  const systems = allSystems.filter((s) => s.visited);
   if (systems.length === 0) return;
 
-  // World-space bounds from system center positions.
+  // Player ship trail + current position from the cached path.
+  const pathPoints = (state.galaxy.shipPath || []).filter((p) => p.x != null && p.y != null);
+  const currentPathIdx = currentPathIndex(pathPoints, state.currentDay);
+  const currentPoint = pathPoints[currentPathIdx] || null;
+  const currentSystemId = currentPoint?.system_id != null ? String(currentPoint.system_id) : null;
+
+  // World-space bounds: union of visited system centers and the ship trail
+  // (so the trail's far extents stay in view at default zoom).
   const xs = systems.map((s) => s.x);
   const ys = systems.map((s) => s.y);
+  for (const p of pathPoints) { xs.push(p.x); ys.push(p.y); }
   const minX = Math.min(...xs), maxX = Math.max(...xs);
   const minY = Math.min(...ys), maxY = Math.max(...ys);
   const padX = Math.max(20000, (maxX - minX) * 0.08);
   const padY = Math.max(20000, (maxY - minY) * 0.08);
-  const baseW = maxX - minX + padX * 2;
-  const baseH = maxY - minY + padY * 2;
+  const baseW = Math.max(40000, maxX - minX + padX * 2);
+  const baseH = Math.max(40000, maxY - minY + padY * 2);
   const baseX = minX - padX;
   const baseY = minY - padY;
 
@@ -589,21 +628,107 @@ function renderGalaxyMap() {
   ensureDefs(svg);
   drawGrid(svg, baseX, baseY, baseW, baseH);
 
+  // Player ship trail (drawn behind systems, in front of grid).
+  drawPlayerShipTrail(svg, pathPoints, currentPathIdx);
+
   // Ship trajectories (galaxy-wide, very faint).
   for (const ship of ships) drawShipPath(svg, ship);
 
-  // System markers (star icon + clickable). Filtered: never-seen systems are
-  // already not in `bodies` because the backend only returns ever-seen ones.
-  for (const sys of systems) drawSystemMarker(svg, sys);
+  // System markers — only visited systems are rendered. The system containing
+  // the player ship at this slider day is marked with isCurrent.
+  for (const sys of systems) {
+    const isCurrent = currentSystemId != null && String(sys.system_id) === currentSystemId;
+    drawSystemMarker(svg, sys, isCurrent);
+  }
 
-  // Player ship marker(s) — always visible, on top.
+  // AI ship markers — always visible, on top.
   for (const ship of ships) {
     const node = drawShipWorld(ship);
     if (node) svg.appendChild(node);
   }
 
+  // Player ship marker at its current-snapshot position (head of trail).
+  if (currentPoint) drawPlayerShipMarker(svg, currentPoint);
+
   // Screen-space label overlay: system names in fixed pixel size.
   renderSystemLabels(overlay, systems, svg);
+
+  // Remember the world-space "viewBox base" so camera animation can convert
+  // between absolute world center and tx/ty deltas.
+  state.galaxy._base = { baseX, baseY, baseW, baseH };
+}
+
+// Index of the last path point whose game_day is ≤ the slider day. Returns
+// the final index when the slider is past the last snapshot.
+function currentPathIndex(pathPoints, day) {
+  if (!pathPoints.length) return -1;
+  let idx = -1;
+  for (let i = 0; i < pathPoints.length; i++) {
+    if (pathPoints[i].game_day <= day) idx = i;
+    else break;
+  }
+  return idx < 0 ? 0 : idx;
+}
+
+function drawPlayerShipTrail(svg, pathPoints, currentIdx) {
+  if (pathPoints.length < 2) return;
+  // Truncate at the current slider day so the line reveals as time advances.
+  const upto = pathPoints.slice(0, currentIdx + 1);
+  if (upto.length < 2) return;
+
+  // Linear gradient: oldest end transparent, newest end bright cyan.
+  // SVG linearGradient uses bounding-box coords by default — switch to user-
+  // space so the gradient aligns with the actual point endpoints.
+  const defs = svg.querySelector("defs") || (() => {
+    const d = document.createElementNS(SVG_NS, "defs");
+    svg.appendChild(d);
+    return d;
+  })();
+  // Remove old gradient if present (we redraw every render).
+  const oldGrad = defs.querySelector("#ship-trail-grad");
+  if (oldGrad) oldGrad.remove();
+  const grad = document.createElementNS(SVG_NS, "linearGradient");
+  grad.setAttribute("id", "ship-trail-grad");
+  grad.setAttribute("gradientUnits", "userSpaceOnUse");
+  grad.setAttribute("x1", upto[0].x);
+  grad.setAttribute("y1", upto[0].y);
+  grad.setAttribute("x2", upto[upto.length - 1].x);
+  grad.setAttribute("y2", upto[upto.length - 1].y);
+  grad.innerHTML = `
+    <stop offset="0%" stop-color="#4cc9ff" stop-opacity="0"/>
+    <stop offset="100%" stop-color="#4cc9ff" stop-opacity="0.95"/>
+  `;
+  defs.appendChild(grad);
+
+  const poly = document.createElementNS(SVG_NS, "polyline");
+  poly.setAttribute("class", "ship-trail");
+  poly.setAttribute("points", upto.map((p) => `${p.x},${p.y}`).join(" "));
+  poly.setAttribute("stroke", "url(#ship-trail-grad)");
+  poly.setAttribute("fill", "none");
+  poly.setAttribute("stroke-width", 400);
+  svg.appendChild(poly);
+}
+
+function drawPlayerShipMarker(svg, p) {
+  const g = document.createElementNS(SVG_NS, "g");
+  g.setAttribute("class", "player-ship");
+  const r = 2600;
+  // Crosshair-style marker so it reads as "this is me" against the star icons.
+  const ring = document.createElementNS(SVG_NS, "circle");
+  ring.setAttribute("cx", p.x);
+  ring.setAttribute("cy", p.y);
+  ring.setAttribute("r", r);
+  ring.setAttribute("fill", "none");
+  ring.setAttribute("stroke", "#4cc9ff");
+  ring.setAttribute("stroke-width", 250);
+  g.appendChild(ring);
+  const dot = document.createElementNS(SVG_NS, "circle");
+  dot.setAttribute("cx", p.x);
+  dot.setAttribute("cy", p.y);
+  dot.setAttribute("r", r * 0.35);
+  dot.setAttribute("fill", "#4cc9ff");
+  g.appendChild(dot);
+  svg.appendChild(g);
 }
 
 // Reduce each system's bodies to a single representative position (the star,
@@ -646,9 +771,12 @@ function aggregateSystems(bodies) {
   return out;
 }
 
-function drawSystemMarker(svg, sys) {
+function drawSystemMarker(svg, sys, isCurrent) {
   const g = document.createElementNS(SVG_NS, "g");
-  const cls = "system" + (sys.anyPresent ? "" : " faded") + (sys.visited ? " visited" : "");
+  // Visited systems are the only ones we render now; "current" is the system
+  // the player ship is in at the slider's day.
+  let cls = "system visited";
+  if (isCurrent) cls += " current-system";
   g.setAttribute("class", cls);
   g.setAttribute("data-system-id", sys.system_id);
 
@@ -656,30 +784,28 @@ function drawSystemMarker(svg, sys) {
   const halo = document.createElementNS(SVG_NS, "circle");
   halo.setAttribute("cx", sys.x);
   halo.setAttribute("cy", sys.y);
-  halo.setAttribute("r", 4500);
+  halo.setAttribute("r", isCurrent ? 6000 : 4500);
   halo.setAttribute("fill", starColor(sys.star_class));
-  halo.setAttribute("opacity", 0.15);
+  halo.setAttribute("opacity", isCurrent ? 0.28 : 0.15);
   halo.setAttribute("filter", "url(#glow)");
   g.appendChild(halo);
 
-  // Star core.
+  // Star core. Current system gets a slightly larger radius.
   const star = document.createElementNS(SVG_NS, "circle");
   star.setAttribute("cx", sys.x);
   star.setAttribute("cy", sys.y);
-  star.setAttribute("r", 2200);
+  star.setAttribute("r", isCurrent ? 3000 : 2200);
   star.setAttribute("fill", starColor(sys.star_class));
   star.setAttribute("class", "system-star");
   g.appendChild(star);
 
-  // Visited ring: thin outline so the eye can spot explored systems.
-  if (sys.visited) {
-    const ring = document.createElementNS(SVG_NS, "circle");
-    ring.setAttribute("cx", sys.x);
-    ring.setAttribute("cy", sys.y);
-    ring.setAttribute("r", 3200);
-    ring.setAttribute("class", "visited-ring");
-    g.appendChild(ring);
-  }
+  // Visited ring: thin outline. Brighter + thicker for the current system.
+  const ring = document.createElementNS(SVG_NS, "circle");
+  ring.setAttribute("cx", sys.x);
+  ring.setAttribute("cy", sys.y);
+  ring.setAttribute("r", isCurrent ? 4200 : 3200);
+  ring.setAttribute("class", "visited-ring");
+  g.appendChild(ring);
 
   // Hover + click handlers.
   g.addEventListener("mouseenter", (ev) => showTooltip(ev, systemTooltip(sys)));
@@ -1085,8 +1211,73 @@ window.addEventListener("keydown", (ev) => {
 
 $("day-slider").addEventListener("input", () => {
   state.currentDay = Number($("day-slider").value);
+  // If the user starts scrubbing while we're zoomed into a system, pop back
+  // to the galaxy map first so the camera follow + system highlight read.
+  if (state.galaxy.focusSystem) {
+    state.galaxy.focusSystem = null;
+  }
   loadSnapshot(state.currentDay);
+  scheduleCameraFollow();
+  scheduleAutoZoom();
 });
+
+// ----- Camera follow + auto-zoom (galaxy view) -----
+
+// Smooth-pan the SVG viewBox so the player ship at the slider's day is
+// centered. Cancels any in-flight animation when called.
+function scheduleCameraFollow() {
+  const path = state.galaxy.shipPath || [];
+  if (!path.length) return;
+  const idx = currentPathIndex(path, state.currentDay);
+  const target = path[idx];
+  if (!target || target.x == null || target.y == null) return;
+  animateCameraTo(target.x, target.y);
+}
+
+function animateCameraTo(worldX, worldY) {
+  const base = state.galaxy._base;
+  if (!base) return; // not yet rendered
+  const g = state.galaxy;
+  const vw = base.baseW / g.scale;
+  const vh = base.baseH / g.scale;
+  const startTx = g.tx;
+  const startTy = g.ty;
+  const endTx = worldX - vw / 2 - base.baseX;
+  const endTy = worldY - vh / 2 - base.baseY;
+  if (Math.hypot(endTx - startTx, endTy - startTy) < 1) return;
+  const dur = 400;
+  const t0 = performance.now();
+  if (g.cameraAnim) cancelAnimationFrame(g.cameraAnim);
+  function step(now) {
+    const u = Math.min(1, (now - t0) / dur);
+    // ease-out cubic
+    const e = 1 - Math.pow(1 - u, 3);
+    g.tx = startTx + (endTx - startTx) * e;
+    g.ty = startTy + (endTy - startTy) * e;
+    if (!state.galaxy.focusSystem) renderGalaxyMap();
+    if (u < 1) g.cameraAnim = requestAnimationFrame(step);
+    else g.cameraAnim = null;
+  }
+  g.cameraAnim = requestAnimationFrame(step);
+}
+
+// After ~700ms of no slider activity, auto-trigger the existing system-click
+// behavior on the current system so the user lands on the orbital ring view.
+function scheduleAutoZoom() {
+  const g = state.galaxy;
+  if (g.autoZoomTimer) clearTimeout(g.autoZoomTimer);
+  g.autoZoomTimer = setTimeout(() => {
+    g.autoZoomTimer = null;
+    const path = g.shipPath || [];
+    if (!path.length) return;
+    const idx = currentPathIndex(path, state.currentDay);
+    const sysId = path[idx]?.system_id;
+    if (sysId == null) return;
+    if (g.focusSystem) return; // user already drilled in manually
+    g.focusSystem = String(sysId);
+    renderGalaxy();
+  }, 700);
+}
 
 $("play-btn").addEventListener("click", () => {
   state.playing = !state.playing;
@@ -1128,10 +1319,12 @@ function startSSE() {
   const es = new EventSource("/events");
   es.addEventListener("hello", () => $("live").classList.remove("off"));
   es.addEventListener("snapshot", async () => {
+    state.galaxy.shipPath = null; // invalidate cache; refetch on next render
     await loadDays();
+    await ensureShipPath();
     await renderTickMarks();
   });
   es.onerror = () => $("live").classList.add("off");
 }
 
-loadDays().then(startSSE);
+loadDays().then(ensureShipPath).then(startSSE);

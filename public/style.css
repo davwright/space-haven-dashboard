@@ -418,6 +418,26 @@ main { height: calc(100% - 44px); }
   fill: none; stroke: #4a5878; stroke-width: 25;
   stroke-dasharray: 80 80; opacity: 0.7;
 }
+#galaxy-svg .ship-trail {
+  fill: none;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 6px rgba(76, 201, 255, 0.55));
+}
+#galaxy-svg .player-ship {
+  pointer-events: none;
+  filter: drop-shadow(0 0 4px rgba(76, 201, 255, 0.9));
+}
+#galaxy-svg .system.current-system .visited-ring {
+  stroke: var(--accent);
+  stroke-width: 320;
+  stroke-dasharray: none;
+  opacity: 1;
+}
+#galaxy-svg .system.current-system .system-star {
+  stroke: var(--accent);
+  stroke-width: 150;
+}
 
 /* Screen-space label overlay so labels stay readable at any zoom. */
 #galaxy-overlay {

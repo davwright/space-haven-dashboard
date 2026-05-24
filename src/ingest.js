@@ -16,7 +16,7 @@ const stmtLatestSnapshot = db.prepare(
   "SELECT snapshot_id, game_day, body_hash FROM snapshots ORDER BY snapshot_id DESC LIMIT 1"
 );
 const stmtInsertSnapshot = db.prepare(
-  "INSERT INTO snapshots (game_day, real_timestamp, save_path, body_hash) VALUES (?, ?, ?, ?)"
+  "INSERT INTO snapshots (game_day, real_timestamp, save_path, body_hash, player_ship_x, player_ship_y, player_system_id) VALUES (?, ?, ?, ?, ?, ?, ?)"
 );
 const stmtInsertBody = db.prepare(
   "INSERT INTO body_observations (snapshot_id, body_id, x, y, type, name, visited, saved, system_id, system_name, star_type, star_class, center_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -44,7 +44,10 @@ const writeSnapshotTxn = db.transaction((parsed) => {
     parsed.gameDay,
     Date.now(),
     parsed.savePath,
-    hash
+    hash,
+    parsed.playerShipX,
+    parsed.playerShipY,
+    parsed.playerSystemId
   );
   const snapshotId = info.lastInsertRowid;
   for (const b of parsed.bodies) {

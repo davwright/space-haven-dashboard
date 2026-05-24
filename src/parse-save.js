@@ -157,9 +157,11 @@ function extractBodies(gameDoc) {
 
 // ----- Ships and crew -----
 
-// Pull non-player AI ships out of the galaxy <fleets> sections.
+// Pull non-player AI ships out of the galaxy <fleets> sections, and
+// simultaneously find the player fleet's galaxy position (x/y/system).
 function extractGalaxyShips(gameDoc) {
   const ships = [];
+  let playerFleet = null;
   walk(gameDoc, (node) => {
     if (!node.systems || typeof node.systems !== "object") return;
     const systemArr = Array.isArray(node.systems.l) ? node.systems.l : node.systems.l ? [node.systems.l] : [];
@@ -173,7 +175,17 @@ function extractGalaxyShips(gameDoc) {
         const fArr = Array.isArray(fleets.f) ? fleets.f : fleets.f ? [fleets.f] : [];
         for (const fleet of fArr) {
           const isPlayer = asBool(fleet["@_isPlayer"]);
-          if (isPlayer) continue; // We track the player ship separately.
+          if (isPlayer) {
+            // Player fleet: capture position once. (There is only one.)
+            if (playerFleet == null) {
+              playerFleet = {
+                x: asNum(fleet["@_x"]),
+                y: asNum(fleet["@_y"]),
+                system_id: systemId,
+              };
+            }
+            continue; // We track the player ship separately.
+          }
           const factionId = fleet["@_factionId"] != null ? String(fleet["@_factionId"]) : null;
           const fx = asNum(fleet["@_x"]);
           const fy = asNum(fleet["@_y"]);
@@ -204,7 +216,7 @@ function extractGalaxyShips(gameDoc) {
   // Dedup by ship_id.
   const seen = new Map();
   for (const s of ships) if (!seen.has(s.ship_id)) seen.set(s.ship_id, s);
-  return [...seen.values()];
+  return { ships: [...seen.values()], playerFleet };
 }
 
 // Walk the <ships><ship sid> tree in the game file. Each <ship> may contain
@@ -500,7 +512,7 @@ function parseSaveFolder(folder) {
   const timelineDoc = readXml(path.join(folder, "timeline.xml"));
 
   const bodies = extractBodies(gameDoc);
-  const galaxyShips = extractGalaxyShips(gameDoc);
+  const { ships: galaxyShips, playerFleet } = extractGalaxyShips(gameDoc);
   const { playerCrew, playerShips } = extractGameShipsAndCrew(gameDoc);
 
   // Player ship = whichever <ship> in the game file holds player crew.
@@ -554,6 +566,9 @@ function parseSaveFolder(folder) {
     timelineEvents: timeline.events,
     playerShipId,
     playerShipName,
+    playerShipX: playerFleet?.x ?? null,
+    playerShipY: playerFleet?.y ?? null,
+    playerSystemId: playerFleet?.system_id ?? null,
   };
 }
 

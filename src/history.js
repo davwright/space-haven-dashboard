@@ -17,7 +17,7 @@ function listDays() {
 function nearestSnapshotForDay(day) {
   return db
     .prepare(
-      "SELECT snapshot_id, game_day, real_timestamp, save_path FROM snapshots WHERE game_day <= ? ORDER BY game_day DESC, snapshot_id DESC LIMIT 1"
+      "SELECT snapshot_id, game_day, real_timestamp, save_path, player_ship_x, player_ship_y, player_system_id FROM snapshots WHERE game_day <= ? ORDER BY game_day DESC, snapshot_id DESC LIMIT 1"
     )
     .get(day);
 }
@@ -25,7 +25,23 @@ function nearestSnapshotForDay(day) {
 function snapshotForDay(day) {
   const snap = nearestSnapshotForDay(day);
   if (!snap) return null;
-  return fullSnapshot(snap.snapshot_id, snap.game_day);
+  const full = fullSnapshot(snap.snapshot_id, snap.game_day);
+  full.playerShipX = snap.player_ship_x;
+  full.playerShipY = snap.player_ship_y;
+  full.playerSystemId = snap.player_system_id;
+  return full;
+}
+
+// Player ship galaxy positions across every snapshot, ordered by game_day.
+function playerShipPath() {
+  return db
+    .prepare(
+      `SELECT game_day, player_ship_x AS x, player_ship_y AS y, player_system_id AS system_id
+         FROM snapshots
+        WHERE player_ship_x IS NOT NULL AND player_ship_y IS NOT NULL
+        ORDER BY game_day ASC, snapshot_id ASC`
+    )
+    .all();
 }
 
 function fullSnapshot(snapshotId, gameDay) {
@@ -200,4 +216,5 @@ module.exports = {
   nearestSnapshotForDay,
   crewHistory,
   timelineTicks,
+  playerShipPath,
 };
