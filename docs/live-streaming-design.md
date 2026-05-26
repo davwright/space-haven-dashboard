@@ -34,9 +34,21 @@ per client and choke the DOM. We split.
 
 ## Protocol
 
-WebSocket Java → Node, then SSE Node → browser. SSE chosen because the
-browser-side stream is one-way; we only need WebSocket on the inner hop
-where commands may flow back from Node (e.g. "force a full snapshot now").
+**Length-prefixed TCP JSON** Java → Node, then SSE Node → browser. SSE on
+the browser hop because the stream is one-way. On the inner hop, TCP is
+bidirectional too, so the "commands back from Node" justification doesn't
+require WebSocket framing — raw `writeInt(len); writeBytes(json)` is
+simpler and lower-latency on localhost ([streaming-research §2](./streaming-research.md)).
+
+Every frame carries a `v` field with the protocol version. Cheap insurance
+when the format evolves.
+
+Every frame also carries a `gameVersion` (from haven's `libVersion`
+attribute), captured by the agent at startup. The browser refuses to
+apply patches whose `gameVersion` doesn't match the current `snapshot`'s
+— surfaced as a "game version mismatch, please reload" banner. This is
+the safety net for when Bugbyte ships a patch that renames a field and
+the agent's pointcuts still match but emit stale paths.
 
 Each message is one of:
 
@@ -70,16 +82,50 @@ semantics, ~40% smaller). Don't pre-optimize.
 
 ### Coalescing
 
-The agent buffers per-tick state and emits at most one patch frame per
-200 ms by default (configurable per client). Within that window:
+**Target latency: ~1 second.** This is a status dashboard, not a
+twitch-shooter HUD. The agent buffers per-tick state and emits at most
+one patch frame per **1000 ms** by default (configurable per client).
+Slower than the 200 ms / 5 Hz the research doc suggests, deliberately:
 
-- repeated `replace` on the same path collapses to the last value
-- an `add` followed by `replace` on the same path collapses to one `add`
-  with the final value
-- a path that ends the window with the same value as it began omits
+- The user explicitly accepts 1s end-to-end latency.
+- 5 Hz over 1 Hz = 5× the patch frames per second, 5× the journal volume,
+  5× the DOM-update work, no perceptual win for non-spatial UI changes.
+- Cheaper coalesce window means more aggressive collapse — mood that
+  flutters across a second ships as one final value.
 
-The journal (see Persistence) records every coalesced frame, not raw
-ticks.
+If profiling later shows the bottleneck is elsewhere and a faster cadence
+is free, the window is one constant to bump.
+
+The coalescer is **two-track**:
+
+- **Path → latest-value map** for `replace` ops. Repeated writes to the
+  same path collapse to the last value. An `add` followed by `replace`
+  on the same path collapses to one `add` with the final value. A path
+  that ends the window with the same value as it began is omitted.
+- **Ordered append list** for `event` frames and any `add`/`remove` with
+  side effects. Never collapsed, never reordered.
+
+Within one transmitted frame, send the collapsed replaces first, then
+the ordered events.
+
+### State key shape
+
+RFC 6902 paths over arrays are positional (`/crew/3/mood` means index 3,
+not crew id 89). Reorders desync silently. So entity collections in
+`state.tree` are **objects keyed by stable id**, not arrays:
+
+```jsonc
+{
+  "crew": { "89": {...}, "92": {...} },         // by entId
+  "ships": { "35": {...}, "923": {...} },       // by sid
+  "bodies": { "255": {...}, "256": {...} },     // by body id
+  "storage": { "15": {...}, "17": {...} },      // by elementaryId
+}
+```
+
+This is a load-bearing decision, not a "later" cleanup. The current
+snapshot shape (arrays) must be transformed at the API boundary before
+any patch flow exists.
 
 ## Browser-side architecture
 
@@ -140,13 +186,18 @@ render functions are dormant until their path changes.
 
 ### Throttling
 
-Patches arrive at network rate. The browser shouldn't apply 60 ops per
-second when the eye can only resolve ~10.
+At the 1 Hz default cadence, throttling barely matters — patches arrive
+slowly enough that direct synchronous `applyOp` calls won't jank.
 
-Buffer incoming ops in `pendingOps[]`. On the next `requestAnimationFrame`,
-flush all pending ops in a single pass, grouped by target node. This
-naturally throttles to 60 fps regardless of network rate, and groups
-multiple writes to the same node into one DOM touch.
+But the primitive is cheap to build right anyway. Buffer incoming ops
+in `pendingOps[]`; on the next `requestAnimationFrame`, flush all
+pending ops in one pass, grouped by target node. This:
+
+- handles momentary bursts (e.g. a 500-op snapshot replay during
+  slider scrub)
+- naturally caps DOM work at 60 fps
+- groups multiple writes to the same node into one DOM touch
+- keeps live and snapshot paths identical — both go through rAF
 
 ### Backpressure (slider scrub)
 
@@ -161,26 +212,60 @@ While the user drags the time slider:
 
 ## Persistence
 
-The current SQLite history (`snapshots`, `body_observations`, etc.) is
-kept as the **compacted snapshot per game day**. Every patch frame is
-also appended to a journal table:
+The slider's history layer is **separate from the live wire**.
+
+**Do NOT journal the coalesced 200 ms wire patches.** They're a render
+convenience: lossy by design, and their resolution is whatever you
+happened to flush live — locking the slider's granularity to that
+is wrong. ([streaming-research §8](./streaming-research.md))
+
+Three storage layers instead:
+
+- **Per-game-day snapshots** — the existing tables (`snapshots`,
+  `body_observations`, `crew_snapshots`, etc.). Domain-aligned interval,
+  bounded growth.
+- **Event log** — append-only, every `event` frame stored. Never
+  coalesced. Drives the slider tick marks and per-day event list.
+- **Optional sparser per-N-tick state deltas** — sampled diffs (e.g.
+  every 100 ticks) for sub-day scrub granularity. Not required for v1.
 
 ```sql
-CREATE TABLE patch_journal (
+CREATE TABLE event_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  tick INTEGER,
-  game_day INTEGER,
-  emitted_at INTEGER,  -- wall-clock ms
-  ops_json TEXT        -- JSON array of ops
+  tick INTEGER NOT NULL,
+  game_day INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  payload_json TEXT
 );
 ```
 
-For a given historical day, the dashboard loads:
-1. The nearest snapshot ≤ that day
-2. All journal rows where `game_day = N` ordered by `id`
-3. Replays the ops forward to reconstruct exact state
+For a given slider day, the dashboard loads:
+1. The snapshot for that day
+2. The event log entries for that day, in order
+3. Renders the snapshot, overlays event markers
 
-Truncate the journal beyond ~30 days back to bound storage growth.
+Time keys are `tick` (the agent's monotonic counter), NOT wall-clock —
+wall-clock drifts across DST and machines, tick is the game's own
+clock and is what the user actually means by "when".
+
+### Reconnect ring buffer
+
+Server keeps an in-memory ring of the last **5 minutes** of frames
+(~1500 frames at 5/s). On reconnect, the client sends its `lastTick`
+and gets either:
+
+- A delta of all frames since `lastTick` if within the ring, OR
+- A fresh `snapshot` frame if `lastTick` is older.
+
+Resume request piggybacks on the SSE query string
+(`/events?since=12345`) — one transport, no separate REST endpoint.
+
+### Backpressure
+
+When the SSE write returns false (Node's outgoing buffer fills), drop
+all `replace` ops EXCEPT the most recent per path, AND drop nothing
+from the `event` track. Resume on `drain`. Don't disconnect the client
+— this isn't a multi-tenant service. ([streaming-research §6](./streaming-research.md))
 
 ## Why not React/Preact/Svelte
 
@@ -213,19 +298,32 @@ We do NOT refactor today. We bias new code so the refactor is small.
 | 3     | Other tabs migrate. Polling/snapshot fallback kept for offline use. |
 | 4     | Journal-replay backs the time slider. |
 
+## Operational details
+
+- **Bind to `127.0.0.1` only**, never `0.0.0.0`. The agent stream is
+  unauthenticated by design — it's a localhost dev tool. Documenting
+  this prevents a future "let's expose this to my LAN" mistake from
+  being a CVE.
+- **Library hot-reload**: when the jar's mtime changes mid-session, the
+  library tables get re-imported, but if a streaming agent is connected
+  to the *previous* JVM the IDs may have shifted. Surface a "game restart
+  required to refresh" banner; bind library version to JVM process id.
+- **Savefile fallback during streaming**: when the agent disconnects mid
+  session, chokidar resumes. The browser shows "agent offline → polling
+  saves." On agent reconnect, server sends a fresh `snapshot`.
+- **Multi-client coordination**: each browser maintains its own
+  `state.tree`. There is no shared write state. Commands back to the
+  JVM (if any) are scoped to the requesting client.
+- **`test` op intentionally unused.** RFC 6902 has it for optimistic
+  concurrency; we have one writer and don't need it.
+
 ## Open questions
 
-- **Tick coalescing default**: 200 ms? Per game tick? Configurable per
-  client? Pick based on early profiling.
-- **Reconnect strategy**: client tracks `lastTick`; on reconnect asks
-  server for "everything since `lastTick`" via a one-shot REST call.
-  Server keeps a ring buffer of recent ops in memory.
-- **What's "state.tree" actually shaped like?** Decision pending; the
-  parser's snapshot shape today is close to what we want, with one
-  caveat: keys must be stable across patches. Right now `crew` is an
-  array indexed by position; should become `crew` as an object keyed
-  by `cid` so patches like `/crew/89/mood` work without array reindex
-  drama.
-- **Java agent injection point**: AspectJ weaver (modloader's path) or
-  direct JVM attach + reflection? AspectJ gives stable hook points
-  across game updates; reflection breaks every patch. Lean AspectJ.
+- **Tick coalescing default**: 1000 ms (user accepts 1s latency).
+  Research recommends 200 ms but the perceptual win at 5 Hz doesn't
+  justify the 5× extra work on a status dashboard.
+- **Java agent injection point**: AspectJ weaver via the modloader's
+  classpath, riding the modloader's "survive game patches" infrastructure
+  rather than building a parallel JVM-attach path. ([streaming-research §3](./streaming-research.md))
+- **Sub-day scrub granularity**: do we need sampled mid-day deltas, or
+  is per-game-day snapshot + event log enough? Probably enough; defer.
