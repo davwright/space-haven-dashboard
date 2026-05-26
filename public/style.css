@@ -1228,6 +1228,44 @@ main > .view.active { display: flex; }
   border-bottom-color: transparent;
 }
 
+/* capabilities-browser widget — roadmap of what each upgrade unlocks. */
+.widget-capabilities-browser { display: flex; flex-direction: column; height: 100%; }
+.widget-capabilities-browser .cb-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0.4rem 0.7rem;
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8rem; font-weight: 600; color: var(--accent);
+}
+.widget-capabilities-browser .cb-body { flex: 1; overflow: auto; padding: 0.3rem 0.5rem; }
+.cb-bucket {
+  margin-bottom: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-2);
+}
+.cb-bucket > summary {
+  cursor: pointer;
+  padding: 5px 8px;
+  font-size: 0.82rem;
+  display: flex; align-items: center; gap: 6px;
+  user-select: none;
+}
+.cb-bucket.unmet > summary  { color: var(--text); }
+.cb-bucket.met   > summary  { color: var(--text-dim); }
+.cb-bucket.always > summary { color: var(--text-dim); }
+.cb-status { font-size: 0.9rem; }
+.cb-bucket-items { padding: 4px 8px 6px 26px; }
+.cb-item {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 0; font-size: 0.78rem;
+  cursor: pointer;
+}
+.cb-item:hover { color: var(--accent); }
+.cb-item-kind { width: 16px; }
+.cb-item-name { font-weight: 500; }
+.cb-unlocks { color: var(--text-dim); margin-left: auto; font-size: 0.72rem; }
+
 /* map-galaxy widget — placeholder card centred in the panel. */
 .sh-widget.widget-map-galaxy {
   display: flex; align-items: center; justify-content: center;

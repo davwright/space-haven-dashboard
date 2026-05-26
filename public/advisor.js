@@ -52,6 +52,12 @@
     const now = SH.tick || Date.now();
     const next = new Map();
     for (const rule of rules.values()) {
+      // Capability gating: if the rule's `requires` predicate isn't met,
+      // skip evaluation entirely. The rule stays registered (visible in
+      // capabilities-browser) but emits no insights.
+      if (Array.isArray(rule.def.requires) && rule.def.requires.length) {
+        if (!rule.def.requires.every((p) => evalRequirement(p, tree))) continue;
+      }
       const fp = fingerprintPaths(tree, rule.def.watch);
       if (fp === rule.lastFingerprint) {
         // Carry over: reuse insights from last run for this rule
@@ -61,7 +67,10 @@
       rule.lastFingerprint = fp;
       let out;
       try {
-        out = rule.def.evaluate(tree) || [];
+        // Pass featureRequires evaluation context so the rule can branch
+        // its insight content. Rule may consult ctx.featureMet(featureKey).
+        const ctx = makeRuleCtx(rule.def, tree);
+        out = rule.def.evaluate(tree, ctx) || [];
       } catch (e) {
         console.error(`[advisor] rule "${rule.def.id}" threw:`, e);
         continue;
@@ -164,11 +173,51 @@
     for (const id of removed) clearToast(id);
   });
 
+  function listRules() {
+    return [...rules.values()].map((r) => r.def);
+  }
+
+  // Evaluate a single capability requirement against state.tree. Mirrors the
+  // logic in widget-capabilities-browser.js so rules and the browser agree.
+  function evalRequirement(p, tree) {
+    if (!p || typeof p !== "object") return false;
+    if (p.any && Array.isArray(p.any)) return p.any.some((q) => evalRequirement(q, tree));
+    if (p.all && Array.isArray(p.all)) return p.all.every((q) => evalRequirement(q, tree));
+    if (p.not) return !evalRequirement(p.not, tree);
+    if (p.type === "research") {
+      const set = new Set((tree.researchedTech || []).map(String));
+      return set.has(String(p.tech));
+    }
+    if (p.type === "skill") {
+      const crew = Array.isArray(tree.crew) ? tree.crew : Object.values(tree.crew || {});
+      for (const c of crew) {
+        for (const s of c.skills || []) {
+          if (s.name === p.skill && (s.level || 0) >= (p.level || 1)) return true;
+        }
+      }
+      return false;
+    }
+    // component / operator-at / profession / resource: data not yet in tree
+    return false;
+  }
+
+  // Build a per-rule context with featureMet(key) lookup.
+  function makeRuleCtx(def, tree) {
+    return {
+      featureMet(key) {
+        const fr = def.featureRequires && def.featureRequires[key];
+        if (!Array.isArray(fr) || fr.length === 0) return true;
+        return fr.every((p) => evalRequirement(p, tree));
+      },
+    };
+  }
+
   window.SH = window.SH || {};
   window.SH.advisor = {
     registerRule,
     subscribe,
     listInsights,
+    listRules,
     dismiss,
     _evaluateAll: evaluateAll,
   };
