@@ -7,7 +7,7 @@
 </head>
 <body>
   <header>
-    <h1>Space Haven Dashboard</h1>
+    <h1>Space Haven Dashboard <span id="app-version" class="ver" title="package version">v…</span></h1>
     <nav>
       <button data-view="status" class="active">Status</button>
       <button data-view="skills">Skills</button>
@@ -19,6 +19,7 @@
       <span id="day-pill">Day —</span>
       <span class="live-indicator" id="live"><span class="dot"></span>Live</span>
       <span class="live-indicator off" id="agent" title="Java agent streaming status"><span class="dot"></span><span id="agent-label">Agent: offline</span></span>
+      <span class="live-indicator off" id="renderer" title="Renderer mode: snapshot replacements vs incremental live patches"><span class="dot"></span><span id="renderer-label">Renderer: snapshot mode</span></span>
     </div>
   </header>
 
@@ -121,6 +122,7 @@
     </section>
   </main>
 
+  <script src="state.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

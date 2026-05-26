@@ -118,6 +118,10 @@ const server = http.createServer((req, res) => {
     }
   }
 
+  if (pathname === "/version") {
+    return jsonRes(res, 200, { version: require("../package.json").version });
+  }
+
   if (pathname === "/status") {
     const days = history.listDays();
     return jsonRes(res, 200, {

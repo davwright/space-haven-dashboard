@@ -60,6 +60,14 @@ header h1 {
   color: var(--accent);
   letter-spacing: 0.4px;
 }
+header h1 .ver {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--text-dim);
+  margin-left: 0.4rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
 header nav { display: flex; gap: 0.3rem; margin-left: 1rem; }
 header nav button {
   background: transparent; border: 1px solid transparent;

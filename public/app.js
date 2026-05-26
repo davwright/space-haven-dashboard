@@ -149,7 +149,12 @@ async function loadDays() {
 async function loadSnapshot(day) {
   const r = await fetch(`/history/snapshot/${day}`);
   if (!r.ok) return;
-  state.snapshot = await r.json();
+  const raw = await r.json();
+  state.snapshot = raw;
+  // Mirror into SH.tree (object-keyed-by-id shape) so the framework layer is
+  // always populated alongside the legacy state.snapshot. Tabs migrate one
+  // at a time; until they do, both representations coexist.
+  SH.replaceTree(SH.normalizeSnapshot(raw));
   $("day-label").textContent = `Day ${state.snapshot.gameDay}`;
   $("day-pill").textContent = `Day ${state.snapshot.gameDay}`;
   // Re-render whichever view is active
@@ -201,9 +206,14 @@ $("needs-attention").addEventListener("change", (e) => {
   renderStatus();
 });
 
+// Stat keys that get bound to live patches. The Conditions column stays
+// imperative for now — it's a fixed-width icon strip rebuilt on each
+// structural render.
+const STATUS_LIVE_KEYS = ["mood", "health", "food", "rest", "comfort", "oxygen", "temperature"];
+
 function renderStatus() {
   if (!state.snapshot) return;
-  const crew = state.snapshot.crew || [];
+  const crewArr = state.snapshot.crew || [];
 
   // Highlight the active sort header
   document.querySelectorAll("#view-status .crew-table th").forEach((th) => {
@@ -211,7 +221,7 @@ function renderStatus() {
     th.classList.toggle("asc", state.sortAsc);
   });
 
-  let rows = crew.slice();
+  let rows = crewArr.slice();
 
   if (state.needsAttentionOnly) {
     rows = rows.filter(needsAttention);
@@ -228,14 +238,66 @@ function renderStatus() {
       : String(bv).localeCompare(String(av));
   });
 
-  $("crew-count").textContent = `${rows.length} / ${crew.length} crew`;
-  $("status-body").innerHTML = rows.map(statusRow).join("");
+  $("crew-count").textContent = `${rows.length} / ${crewArr.length} crew`;
+
+  // Tear down old bindings from the previous render: every node under
+  // status-body that has bindings registered. We just clear by iterating
+  // the table body; SH.unbindCell tolerates nodes with no bindings.
+  const body = $("status-body");
+  body.querySelectorAll(".stat-bar, .stat-bar .fill, .stat-bar .over-fill, .stat-bar .val")
+      .forEach((el) => SH.unbindCell(el));
+
+  // Structural render: build the rows in one innerHTML pass (cheap, ~6 rows),
+  // then walk back over them to register surgical bindings on each cell.
+  body.innerHTML = rows.map(statusRow).join("");
+
+  for (const c of rows) {
+    if (c.cid == null) continue;
+    const tr = body.querySelector(`tr[data-cid="${c.cid}"]`);
+    if (!tr) continue;
+    for (const key of STATUS_LIVE_KEYS) {
+      const bar = tr.querySelector(`.stat-bar[data-stat="${key}"]`);
+      if (!bar) continue;
+      bindStatCell(`/crew/${c.cid}/${key}`, bar, key, c[`${key}_long`]);
+    }
+  }
 
   // Tooltip handlers on condition icons
   document.querySelectorAll("#status-body .cond[data-tip]").forEach((el) => {
     el.addEventListener("mouseenter", (ev) => showTooltip(ev, el.dataset.tip));
     el.addEventListener("mouseleave", hideTooltip);
     el.addEventListener("mousemove", (ev) => moveTooltip(ev));
+  });
+}
+
+// Bind a stat-bar wrapper to a path. The renderFn recomputes severity class,
+// fill width(s), and the displayed integer in-place — no innerHTML on the
+// wrapper or its children, so no orphaned bindings.
+function bindStatCell(path, barEl, key, longVal) {
+  const fill = barEl.querySelector(".fill");
+  const overFill = barEl.querySelector(".over-fill");
+  const val = barEl.querySelector(".val");
+  SH.bindCell(path, barEl, (node, v) => {
+    if (v == null || Number.isNaN(v)) return;
+    const sev = severity(key, v);
+    // Replace just the s-* token; preserve the rest of the class list
+    // (especially the "over" modifier and any future siblings).
+    node.classList.remove("s-extreme", "s-major", "s-minor", "s-neutral", "s-content", "s-happy");
+    node.classList.add(`s-${sev}`);
+    let basePct, overPct = 0;
+    if (key === "mood") {
+      basePct = Math.max(0, Math.min(100, (v + 100) / 2));
+    } else {
+      basePct = Math.max(0, Math.min(100, v));
+      if (v > 100) overPct = Math.min(50, v - 100);
+    }
+    if (fill) fill.style.width = `${basePct}%`;
+    if (overFill) overFill.style.width = `${overPct}%`;
+    if (val) val.textContent = Math.round(v);
+    const tip = longVal != null
+      ? `${Math.round(v)} (long-term ${Math.round(longVal)})`
+      : `${Math.round(v)}`;
+    node.setAttribute("title", tip);
   });
 }
 
@@ -249,7 +311,8 @@ function statusRow(c) {
   const attn = needsAttention(c) ? " attention" : "";
   const conditions = conditionStrip(c.conditions || []);
   const task = c.task ? `<span class="sub">${esc(c.task)}</span>` : "";
-  return `<tr class="${attn.trim()}">
+  const cidAttr = c.cid != null ? ` data-cid="${esc(c.cid)}"` : "";
+  return `<tr class="${attn.trim()}"${cidAttr}>
     <td class="name">${esc(c.name || c.cid)}${task}</td>
     ${statCell("mood", c.mood, c.mood_long)}
     ${statCell("health", c.health, c.health_long)}
@@ -269,13 +332,14 @@ function statCell(key, val, longVal) {
 
 // Horizontal stat bar with value overlay. Used in Status tab vitals and the
 // Nutrition tab Health column.
+//
+// The skeleton always includes a .fill, .over-fill, and .val span so that
+// bindCell renderers can drive them surgically — even if the current value
+// puts over-fill at 0% width.
 function statBar(key, val, longVal) {
   const sev = severity(key, val);
   const tr = trend(val, longVal);
   const arrow = tr ? `<span class="trend ${tr}">${tr === "up" ? "▲" : "▼"}</span>` : "";
-  // Fill width: mood is -100..100 (map to 0..100). Vitals can exceed 100
-  // (food/rest go up to ~150). Show the first 100 as the normal fill, render
-  // anything >100 as an "over" segment that overlaps the right edge.
   let basePct, overPct = 0;
   if (key === "mood") {
     basePct = Math.max(0, Math.min(100, (val + 100) / 2));
@@ -287,9 +351,9 @@ function statBar(key, val, longVal) {
   const tip = longVal != null
     ? `${Math.round(val)} (long-term ${Math.round(longVal)})`
     : `${Math.round(val)}`;
-  return `<span class="stat-bar s-${sev}${overflowAttr}" title="${tip}">`
+  return `<span class="stat-bar s-${sev}${overflowAttr}" data-stat="${key}" title="${tip}">`
        + `<span class="fill" style="width:${basePct}%"></span>`
-       + (overPct > 0 ? `<span class="over-fill" style="width:${overPct}%"></span>` : "")
+       + `<span class="over-fill" style="width:${overPct}%"></span>`
        + `<span class="val">${Math.round(val)}</span>`
        + arrow
        + `</span>`;
@@ -1694,6 +1758,18 @@ function startSSE() {
     await renderTickMarks();
   });
 
+  // Stub: incremental RFC-6902 patches from the streaming agent.
+  // Wire is in place so the agent can start sending immediately; no UI work
+  // is needed once the wire format matches what SH.applyOps expects.
+  es.addEventListener("patch", (ev) => {
+    try {
+      const data = JSON.parse(ev.data);
+      if (data && Array.isArray(data.ops)) SH.applyOps(data.ops);
+    } catch (e) {
+      console.error("patch event parse failed", e);
+    }
+  });
+
   // Java agent liveness: any heartbeat frame within the last 10s = green.
   // We don't trust the server-side `agent-status` event alone — if it's
   // missed (refresh, etc.) we'd be stuck on "offline" forever. Frames
@@ -1725,5 +1801,25 @@ function startSSE() {
 
   es.onerror = () => $("live").classList.add("off");
 }
+
+// Renderer mode badge: snapshot (default) vs live patches. Switches when
+// SH.applyOps is first called (i.e. an incremental patch arrives).
+SH.onRendererModeChange = (mode) => {
+  const el = $("renderer");
+  const label = $("renderer-label");
+  if (!el || !label) return;
+  if (mode === "live") {
+    el.classList.remove("off");
+    label.textContent = "Renderer: live patches";
+  } else {
+    el.classList.add("off");
+    label.textContent = "Renderer: snapshot mode";
+  }
+};
+
+fetch("/version")
+  .then((r) => r.json())
+  .then((j) => { $("app-version").textContent = "v" + j.version; })
+  .catch(() => { $("app-version").textContent = ""; });
 
 loadDays().then(ensureShipPath).then(ensureRecipes).then(startSSE);

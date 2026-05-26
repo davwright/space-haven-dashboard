@@ -1,12 +1,13 @@
 {
   "name": "space-haven-dashboard",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Live dashboard for Space Haven savegames with historical observation log",
   "private": true,
   "type": "commonjs",
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js",
+    "start": "npm version patch --no-git-tag-version --allow-same-version --silent && node src/server.js",
+    "start:noversion": "node src/server.js",
     "test": "node --test test/*.test.js",
     "import-library": "node scripts/import-library.js",
     "extract-icons": "node scripts/extract-icons.js"
