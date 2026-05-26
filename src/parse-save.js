@@ -573,6 +573,84 @@ function extractGrowBeds(gameDoc, parsedShips) {
   return beds;
 }
 
+// ----- Recipe ingredient ratios (player-tuned weights per recipe) -----
+//
+// Each facility entity in the save carries one or more <prod> blocks. When the
+// player has tuned the slider weights in the kitchen / composter / itemfab UI,
+// that block has a <cinv> child with one <f element="X" value="0..1"/> per
+// ingredient. We collect every <prod> that has at least one <f> in its <cinv>.
+//
+//   <prod pid="850" fpid="89">         pid = recipe (process product id),
+//     <cinv>                            fpid = facility process id (89 = Kitchen)
+//       <f element="71" value="0.30"/>  element id 71 = Bio matter
+//       <f element="16" value="0.60"/>  element id 16 = Water
+//     </cinv>
+//     <food>…</food>
+//   </prod>
+//
+// pid in the save isn't the recipe_defs.id from haven (they don't overlap);
+// we just expose it as an opaque key alongside ratios so the frontend can
+// match. The wrapping <e ... m="MID"> tells us which placed facility this
+// prod belongs to, so we also surface that mid.
+function extractRecipeRatios(gameDoc) {
+  const out = {};
+  walk(gameDoc, (node, chain) => {
+    if (!node || typeof node !== "object") return;
+    if (!Array.isArray(node.prod) && !node.prod) return;
+    // <prod> children may be array (parser ensures via isArray("p")? no — we
+    // don't force <prod> to array. Handle both shapes.)
+    const prodArr = Array.isArray(node.prod) ? node.prod : [node.prod];
+    // Nearest ancestor <e m="MID"> is the placed facility.
+    let facilityMid = null;
+    if (node["@_m"] != null) facilityMid = String(node["@_m"]);
+    else {
+      for (const anc of chain) {
+        if (anc["@_m"] != null) { facilityMid = String(anc["@_m"]); break; }
+      }
+    }
+    for (const p of prodArr) {
+      if (!p || typeof p !== "object") continue;
+      const pid = p["@_pid"];
+      const fpid = p["@_fpid"];
+      const cinv = p.cinv;
+      if (!cinv || pid == null) continue;
+      const fArr = Array.isArray(cinv.f) ? cinv.f : cinv.f ? [cinv.f] : [];
+      if (fArr.length === 0) continue;
+      const ratios = {};
+      for (const f of fArr) {
+        const el = f["@_element"];
+        const v = asNum(f["@_value"]);
+        if (el == null || v == null) continue;
+        ratios[String(el)] = v;
+      }
+      if (Object.keys(ratios).length === 0) continue;
+      const key = String(pid);
+      out[key] = {
+        pid: Number(pid),
+        fpid: fpid != null ? Number(fpid) : null,
+        facility_mid: facilityMid,
+        ratios,
+      };
+    }
+  });
+  return out;
+}
+
+// ----- Corpses (dead entities in the world) -----
+//
+// Bodies aren't a separate entity type — they're characters with dead="1".
+// They live inside <items><i><e cid=X task="Die" side="..." dead="1">...
+// We just count them per save (good enough for the Fertility supply panel).
+function countCorpses(gameDoc) {
+  let n = 0;
+  walk(gameDoc, (node) => {
+    if (!node || typeof node !== "object") return;
+    if (node["@_dead"] == null) return;
+    if (asBool(node["@_dead"])) n++;
+  });
+  return n;
+}
+
 // ----- Star jumps (hyperspace network) -----
 //
 // The save's <starmap><slines><s s1 sy1 s2 sy2 [w] [bs] [ips] [mp]/> list IS
@@ -706,6 +784,8 @@ function parseSaveFolder(folder) {
   const storage = extractStorage(gameDoc);
   const jumpEdges = extractJumpEdges(gameDoc);
   const growBeds = extractGrowBeds(gameDoc);
+  const recipeRatios = extractRecipeRatios(gameDoc);
+  const corpses = countCorpses(gameDoc);
   const timeline = timelineDoc ? extractTimeline(timelineDoc) : { events: [], currentDay: 0 };
 
   return {
@@ -718,6 +798,8 @@ function parseSaveFolder(folder) {
     storage,
     jumpEdges,
     growBeds,
+    recipeRatios,
+    corpses,
     timelineEvents: timeline.events,
     playerShipId,
     playerShipName,
@@ -759,6 +841,11 @@ function parseSaveFolderWithExtras(folder) {
       bodies: byBody,
       jump_edges_json: r.jumpEdges && r.jumpEdges.length ? JSON.stringify(r.jumpEdges) : null,
       grow_beds: r.growBeds || [],
+      recipe_ratios_json:
+        r.recipeRatios && Object.keys(r.recipeRatios).length
+          ? JSON.stringify(r.recipeRatios)
+          : null,
+      corpses: r.corpses ?? 0,
     });
   }
   return r;
@@ -766,6 +853,6 @@ function parseSaveFolderWithExtras(folder) {
 
 module.exports = {
   parseSaveFolder: parseSaveFolderWithExtras,
-  _internals: { walk, readXml, hexToString, flattenCrew, extractBodies, extractJumpEdges, extractStuff, extractGrowBeds },
+  _internals: { walk, readXml, hexToString, flattenCrew, extractBodies, extractJumpEdges, extractStuff, extractGrowBeds, extractRecipeRatios, countCorpses },
   _extras: { set: _setExtras, get: _getExtras, clear: _clearExtras },
 };

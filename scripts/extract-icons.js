@@ -1,31 +1,32 @@
 "use strict";
 
-// Extracts food / crop icons from spacehaven.jar into public/icons/<element_id>.png.
+// Extracts every available item / build-element icon from spacehaven.jar into
+// public/icons/.
 //
-// The jar ships three artefacts we need:
-//   library/haven         each <product eid=...><GUIAnimation aid="..."/></product>
-//                         pairs an in-game element id with a named animation.
-//   library/animations    each <ba n="aid" id="..."><items><assetPos a="N"/></items></ba>
-//                         resolves the animation name to a numeric asset id.
-//   library/textures      <re n="N" t="T" x y w h id="..."/> maps that asset id to
-//                         a region (rect) inside atlas library/T.cim.
-//   library/T.cim         zlib-deflated. Header: BE uint32 width, BE uint32 height,
-//                         BE uint32 channels(=4), 4 bytes unknown (=0). Then RGBA8.
+// Two namespaces are extracted:
+//   * Products (storage items + crops): <Product><product eid=...><GUIAnimation
+//     aid="..."/></product>. Saved as <eid>.png; indexed under key "<eid>".
+//     These are what storage_observations.elementary_id references.
+//   * Build elements (placeable structures, dispensers, etc.): <Element><me
+//     mid=...><objectInfo><guiIcon aid="..."/></objectInfo></me>. Saved as
+//     mid_<mid>.png; indexed under key "mid:<mid>". Used by the map / build
+//     panel.
 //
-// We only extract icons for the elements we care about — every product whose
-// type is Crop OR whose aid contains a food-suggestive substring (foodIcon,
-// veggies, fruit, meat, fiber, nut, grain, algae). About a dozen PNGs total.
+// Resolution pipeline (same for both):
+//   aid (string)   library/animations <ba n=...><assetPos a=...> → asset id
+//   asset id (N)   library/textures   <re n="N" t="T" x y w h/>   → region in
+//                                                                   atlas T
+//   library/<T>.cim   zlib-deflated. Header: BE uint32 width, BE uint32
+//                     height, BE uint32 channels(=4). Then RGBA8 pixels.
 //
-// Idempotent: if every target PNG already exists and the jar mtime stored in
-// public/icons/.jar-mtime matches the current jar's mtime, skip everything.
+// Idempotent: if the jar mtime stored in public/icons/.jar-mtime matches the
+// current jar's mtime and index.json exists, skip everything.
 
 const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
 
 const { findJar } = require("./import-library");
-
-const FOOD_AID_RE = /food|veggies|veggie|fruit|meat|fiber|nut|grain|algae|hops|seed/i;
 
 // -------- Minimal zip reader (mirrors import-library.js) -------------------
 
@@ -153,23 +154,40 @@ function buildPng(w, h, rgba) {
 
 // -------- Driver ----------------------------------------------------------
 
-// Parse haven for { eid, aid } pairs we care about. We DON'T pull in a full
-// XML parser for this — the pattern is regular enough to grep, and we only
-// need products that mention type=Crop or have a food-shaped aid.
-function findFoodProducts(havenXml) {
+// Parse haven for every <product eid=...> that carries a <GUIAnimation aid>.
+// These are inventory items (Elementary type) and crops (Crop type) — the
+// things storage_observations references by elementary_id.
+function findProducts(havenXml) {
   const out = [];
   const re = /<product eid="(\d+)" type="(\w+)"[\s\S]*?<\/product>/g;
   let m;
   while ((m = re.exec(havenXml)) !== null) {
     const eid = Number(m[1]);
     const type = m[2];
-    const inner = m[0];
-    const aidM = /<GUIAnimation aid="([^"]+)"/.exec(inner);
+    const aidM = /<GUIAnimation aid="([^"]+)"/.exec(m[0]);
     if (!aidM) continue;
-    const aid = aidM[1];
-    if (type === "Crop" || FOOD_AID_RE.test(aid)) {
-      out.push({ eid, type, aid });
-    }
+    if (aidM[1] === "null") continue;
+    out.push({ kind: "product", eid, type, aid: aidM[1] });
+  }
+  return out;
+}
+
+// Parse haven for every <me mid=...> whose <objectInfo> has a <guiIcon aid>.
+// These are buildable map elements (machines, dispensers, decor) — what the
+// build menu lists.
+function findBuildElements(havenXml) {
+  const out = [];
+  const re = /<me mid="(\d+)"[\s\S]*?<\/me>/g;
+  let m;
+  while ((m = re.exec(havenXml)) !== null) {
+    const mid = Number(m[1]);
+    // The <guiIcon> only appears inside <objectInfo>; <me> without an
+    // <objectInfo> doesn't have one. (The regex match is bounded by </me> so
+    // we won't pick up a neighbouring me's guiIcon.)
+    const aidM = /<guiIcon aid="([^"]+)"/.exec(m[0]);
+    if (!aidM) continue;
+    if (aidM[1] === "null") continue;
+    out.push({ kind: "me", mid, aid: aidM[1] });
   }
   return out;
 }
@@ -229,35 +247,39 @@ function extractIcons({ jarPath, outDir, logger = console } = {}) {
     const anims = readEntry(zip.fd, zip.entries.find((e) => e.name === "library/animations")).toString("utf8");
     const tex = readEntry(zip.fd, zip.entries.find((e) => e.name === "library/textures")).toString("utf8");
 
-    const products = findFoodProducts(haven);
+    const products = findProducts(haven);
+    const buildEls = findBuildElements(haven);
     const aidIdx = buildAidToAssetIndex(anims);
     const regionIdx = buildAssetToRegionIndex(tex);
 
-    logger.log(`[extract-icons] candidates: ${products.length} products, ${aidIdx.size} aid→asset, ${regionIdx.size} regions`);
+    logger.log(`[extract-icons] candidates: ${products.length} products + ${buildEls.length} build elements, ${aidIdx.size} aid→asset, ${regionIdx.size} regions`);
 
-    // Resolve each product to a region, grouping by atlas to avoid decoding the
-    // same big CIM twice.
-    const byAtlas = new Map(); // atlas index -> [{eid, region, aid}]
-    const resolved = [];
+    // Resolve each candidate to a region, grouping by atlas so each CIM is
+    // decoded once.
+    const byAtlas = new Map(); // atlas index -> [{key, fileName, region, aid}]
     const missing = [];
-    for (const p of products) {
-      const asset = aidIdx.get(p.aid);
+
+    function plan(candidate) {
+      const key = candidate.kind === "product" ? String(candidate.eid) : `mid:${candidate.mid}`;
+      const fileName = candidate.kind === "product" ? `${candidate.eid}.png` : `mid_${candidate.mid}.png`;
+      const asset = aidIdx.get(candidate.aid);
       if (asset == null) {
-        missing.push({ ...p, reason: "no asset for aid" });
-        continue;
+        missing.push({ ...candidate, reason: "no asset for aid" });
+        return;
       }
       const region = regionIdx.get(asset);
       if (!region) {
-        missing.push({ ...p, asset, reason: "no region for asset" });
-        continue;
+        missing.push({ ...candidate, asset, reason: "no region for asset" });
+        return;
       }
-      resolved.push({ ...p, asset, region });
       if (!byAtlas.has(region.t)) byAtlas.set(region.t, []);
-      byAtlas.get(region.t).push({ eid: p.eid, region, aid: p.aid });
+      byAtlas.get(region.t).push({ key, fileName, region, aid: candidate.aid });
     }
+    for (const p of products) plan(p);
+    for (const m of buildEls) plan(m);
 
     const written = [];
-    const index = {}; // eid -> { aid, w, h, atlas }
+    const index = {}; // key (eid or "mid:N") -> { aid, w, h, atlas, file }
     for (const [atlasId, items] of byAtlas) {
       const cimEntry = zip.entries.find((e) => e.name === `library/${atlasId}.cim`);
       if (!cimEntry) {
@@ -270,7 +292,7 @@ function extractIcons({ jarPath, outDir, logger = console } = {}) {
       for (const it of items) {
         const { x, y, w, h } = it.region;
         if (x + w > atlas.width || y + h > atlas.height) {
-          logger.warn(`[extract-icons]   eid=${it.eid} region OOB; skipping`);
+          logger.warn(`[extract-icons]   ${it.key} region OOB; skipping`);
           continue;
         }
         const region = Buffer.alloc(w * h * 4);
@@ -283,10 +305,10 @@ function extractIcons({ jarPath, outDir, logger = console } = {}) {
           );
         }
         const png = buildPng(w, h, region);
-        const outFile = path.join(outDir, `${it.eid}.png`);
+        const outFile = path.join(outDir, it.fileName);
         fs.writeFileSync(outFile, png);
         written.push(outFile);
-        index[String(it.eid)] = { aid: it.aid, w, h, atlas: atlasId };
+        index[it.key] = { aid: it.aid, w, h, atlas: atlasId, file: it.fileName };
       }
     }
 

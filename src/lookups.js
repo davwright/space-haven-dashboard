@@ -163,6 +163,22 @@ function skillInfo(sk) {
   return { id: sk, name: name || `Skill #${sk}` };
 }
 
+// Fertility-supply element ids. Discovered by SELECT id FROM element_defs
+// JOIN text_defs against haven libVersion 1.0.1_steam_2 (2026-05-26):
+//   - Bio Matter = 71  (compost input)
+//   - Fertilizer = 2475 (compost output)
+// There is no separate "Compost" item — Compost is the *process* the
+// composter runs (Bio Matter + corpses → Fertilizer + Water). The Fertility
+// panel surfaces all three storage counts plus the live corpse count.
+const FERTILITY_ELEMENT_IDS = {
+  bioMatter: 71,
+  fertilizer: 2475,
+  // Kept for API symmetry with the UI's "Compost:" label — no element id,
+  // composter outputs Fertilizer (the eid above). Frontend can show the same
+  // count under both names if it wants, or omit.
+  compost: null,
+};
+
 // Compact string accessors for legacy callers.
 const conditionName = (id) => conditionInfo(id).name;
 const attributeName = (id) => attributeInfo(id).name;
@@ -243,4 +259,5 @@ module.exports = {
   decorateStorage,
   sortGroupName,
   SORT_GROUP_NAMES,
+  FERTILITY_ELEMENT_IDS,
 };

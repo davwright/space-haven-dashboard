@@ -6,7 +6,7 @@
 // are returned with a `lastSeenDay` so the UI can fade them.
 
 const db = require("./db");
-const { decorateCrew, decorateStorage, elementInfo } = require("./lookups");
+const { decorateCrew, decorateStorage, elementInfo, FERTILITY_ELEMENT_IDS } = require("./lookups");
 
 function listDays() {
   return db
@@ -17,7 +17,7 @@ function listDays() {
 function nearestSnapshotForDay(day) {
   return db
     .prepare(
-      "SELECT snapshot_id, game_day, real_timestamp, save_path, player_ship_x, player_ship_y, player_system_id, jump_edges_json FROM snapshots WHERE game_day <= ? ORDER BY game_day DESC, snapshot_id DESC LIMIT 1"
+      "SELECT snapshot_id, game_day, real_timestamp, save_path, player_ship_x, player_ship_y, player_system_id, jump_edges_json, recipe_ratios_json, corpses FROM snapshots WHERE game_day <= ? ORDER BY game_day DESC, snapshot_id DESC LIMIT 1"
     )
     .get(day);
 }
@@ -30,7 +30,24 @@ function snapshotForDay(day) {
   full.playerShipY = snap.player_ship_y;
   full.playerSystemId = snap.player_system_id;
   full.jumpEdges = snap.jump_edges_json ? safeJson(snap.jump_edges_json) || [] : [];
+  full.recipeRatios = snap.recipe_ratios_json ? safeJson(snap.recipe_ratios_json) || {} : {};
+  full.fertility = buildFertility(full.storage, snap.corpses || 0);
   return full;
+}
+
+// Surface compost/fertilizer/bio matter from the storage list (we already
+// have decorated rows with elementary_id), plus the live corpse count.
+function buildFertility(storage, corpses) {
+  const byEid = new Map();
+  for (const s of storage || []) byEid.set(String(s.elementary_id), s.count || 0);
+  return {
+    bioMatter: byEid.get(String(FERTILITY_ELEMENT_IDS.bioMatter)) || 0,
+    fertilizer: byEid.get(String(FERTILITY_ELEMENT_IDS.fertilizer)) || 0,
+    // No standalone Compost item — composter produces Fertilizer. We mirror
+    // the fertilizer count here so the UI's "Compost:" label has a number.
+    compost: byEid.get(String(FERTILITY_ELEMENT_IDS.fertilizer)) || 0,
+    corpses,
+  };
 }
 
 // Player ship galaxy positions across every snapshot, ordered by game_day.

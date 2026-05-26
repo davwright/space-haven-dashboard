@@ -162,6 +162,15 @@ ensureColumn("body_observations", "scannable", "INTEGER DEFAULT 0");
 // hyperspace gate could add edges, so we still record per-snapshot.
 ensureColumn("snapshots", "jump_edges_json", "TEXT");
 
+// Per-recipe ingredient ratios tuned by the player in facility UIs (Kitchen
+// sliders etc.). { [recipe_pid]: { pid, fpid, facility_mid, ratios: { eid:
+// weight } } }. Stored as JSON so the shape can evolve without a migration.
+ensureColumn("snapshots", "recipe_ratios_json", "TEXT");
+
+// Count of dead entities (<e dead="1">) in the world at snapshot time. Used
+// by the Fertility supply panel (corpses are composter input).
+ensureColumn("snapshots", "corpses", "INTEGER DEFAULT 0");
+
 // ----- Insert interception ------------------------------------------------
 //
 // ingest.js is intentionally not edited here (parallel agent rules), but we
@@ -187,6 +196,9 @@ const _updateBodyExtras = _rawPrepare(
 );
 const _updateSnapshotJumps = _rawPrepare(
   "UPDATE snapshots SET jump_edges_json = ? WHERE snapshot_id = ?"
+);
+const _updateSnapshotRecipes = _rawPrepare(
+  "UPDATE snapshots SET recipe_ratios_json = ?, corpses = ? WHERE snapshot_id = ?"
 );
 const _insertGrowBed = _rawPrepare(
   "INSERT OR REPLACE INTO grow_bed_observations (snapshot_id, plant_id, plant_name, growth, stage, bed_x, bed_y, ship_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
@@ -241,6 +253,13 @@ db.prepare = function wrappedPrepare(sql) {
           const payload = loadExtras()?.get(savePath);
           if (payload && payload.jump_edges_json) {
             _updateSnapshotJumps.run(payload.jump_edges_json, snapshotId);
+          }
+          if (payload && (payload.recipe_ratios_json || payload.corpses != null)) {
+            _updateSnapshotRecipes.run(
+              payload.recipe_ratios_json || null,
+              payload.corpses || 0,
+              snapshotId
+            );
           }
           if (payload && Array.isArray(payload.grow_beds)) {
             for (const gb of payload.grow_beds) {
