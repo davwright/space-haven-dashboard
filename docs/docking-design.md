@@ -181,6 +181,7 @@ Decomposing the existing UI:
 | `day-slider` | (new) | Time-travel slider as its own widget |
 
 Future (the user named these):
+- `notifications` — generic alert feed; see "Notifications widget" below
 - `trade-prices` — per-system trader inventories
 - `trade-routes` — your historical travel economics
 - `cargo-manifest` — what's on your ship right now
@@ -188,6 +189,84 @@ Future (the user named these):
 - `mineral-frontier` — scanned-but-unmined deposits
 - `derelict-log` — derelicts encountered + their stuff
 - `research-tree` — uses haven's Tech/TechTree (needs extractor extension)
+
+## Notifications widget
+
+A cross-cutting concern: any other widget (or the dashboard itself) can
+emit a notification. The notifications widget renders them as a feed of
+cards. Users dismiss with a click; clicking the body of a card can
+optionally highlight whatever the notification is *about* (a crew member
+in the status widget, a body on the map, a storage item, etc.).
+
+### Notification shape
+
+```js
+SH.notify({
+  id: "low-food-julienne-d67",       // optional; if reused, replaces the prior card
+  icon: "🍽" | "/icons/179.png",     // emoji or any URL
+  title: "Julienne is starving",     // short
+  body: "Mood -25 from hunger.       // string (plain), HTML, or markdown
+         Bio matter at 12 / 200.",
+  level: "warning",                  // info | warning | critical | success | debug
+  source: "crew-status",             // widget id that emitted it
+  ttl: 30000,                        // ms; 0 = sticky until dismissed
+  highlight: {                       // optional — what clicking the card focuses
+    widget: "crew-status",           // open this widget (focus its pane)
+    target: "/crew/89",              // and ping the bound DOM node for /crew/89
+  },
+  actions: [                         // optional buttons in the card footer
+    { label: "Show on map", do: () => SH.focusWidget("map-galaxy", { systemId: 31 }) },
+    { label: "Dismiss",     do: "dismiss" },  // string shortcut for stock action
+  ],
+});
+```
+
+### Behaviors
+
+- **Dismiss with one click** anywhere on the card chrome (not the body
+  link region). Or `Esc` for the top card.
+- **Click the body** → run `highlight`: focus the named widget (bring
+  its pane to front if it's in a tab group; create it if missing in the
+  current workspace? Configurable — default: only focus, don't create);
+  add a brief `.flash` class on the bound DOM node for ~1.2s.
+- **TTL** auto-dismisses; "Pin" action prevents auto-dismiss.
+- **Stacked** when multiple; collapsible groups by `source`.
+- **Persistence**: notifications themselves are ephemeral — not in
+  localStorage. Only the widget instance + position persist.
+
+### Emission rules
+
+Widgets call `SH.notify(...)`. The host:
+- Routes the card to every mounted `notifications` widget (there may be
+  zero or several).
+- If there's no `notifications` widget anywhere in the active workspace,
+  the host shows a toast in the corner instead, so the user isn't
+  silently losing alerts. The toast also opens a "📬 N" badge in the
+  header that, when clicked, lists missed notifications and offers to
+  add a Notifications widget to the workspace.
+
+### Body content
+
+- **Plain text** is the default.
+- **HTML** allowed when the emitter sets `bodyType: "html"`; the host
+  applies a strict sanitizer (allow `b/i/em/strong/a/img/span/br/code`
+  and not much else).
+- **Markdown** when `bodyType: "md"` — render via a tiny markdown subset
+  (links, bold, italic, code, image). No need for a full lib; we'll
+  inline ~80 LOC of regex-based rendering. If a notification needs
+  more, it can pass `bodyType: "html"` instead.
+- **Images** via `<img src="/icons/179.png">` (or any other URL the
+  emitter trusts).
+
+### Visual style
+
+- Card with the standard dark bg, severity-band-colored left rule
+  (info=blue, warning=yellow, critical=red, success=green, debug=gray)
+- Icon top-left, title bold, body smaller weight, dismiss X top-right
+- Smooth slide-in from the right (`transform: translateX(100%) → 0`)
+  with a subtle accent box-shadow
+- Newest on top by default; sticky cards (`ttl: 0`) anchored below the
+  feed
 
 ## Streaming compatibility
 

@@ -69,6 +69,14 @@ existing band CSS. ~40 LOC.
 
 ## Backlog — known wants, not started
 
+- **Notifications widget**: cross-cutting alert feed. Icon + title + body
+  (plain text / markdown / HTML / images), severity-banded left rule,
+  click body → highlight the referenced data in another widget,
+  one-click dismiss, TTL auto-dismiss, stack/collapse by source. If no
+  Notifications widget is mounted in the active workspace, fall back
+  to corner toasts + a header badge. Spec details in
+  `docking-design.md` → "Notifications widget" section. Emission API:
+  `SH.notify({icon, title, body, level, highlight, actions, ttl})`.
 - Per-crew condition tooltip (icon strip currently just colored dots; on
   hover show condition name + mood/rate effects).
 - Map: clickable timeline events for slider scrub (jump to a system on
