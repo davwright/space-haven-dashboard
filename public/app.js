@@ -462,31 +462,54 @@ function traitsCell(traits) {
     .join(" ");
 }
 
-// Vertical tally-bar skill cell. One <span class="bar"> per slot up to
-// max(maxLevelNormal, maxLevelPassion, level, 1). Color encodes filled/empty/
-// passion-potential/filled-passion.
+// Exp required to reach the NEXT level from the named level (level N → N+1).
+// Values verified from save data + community wiki; if any are off, the user
+// will tell us.
+const SKILL_EXP_THRESHOLDS = {
+  0: 100, 1: 200, 2: 500, 3: 1000, 4: 2000, 5: 5400, 6: 11000, 7: 22000, 8: 45000,
+};
+
+function expThreshold(level) {
+  if (level in SKILL_EXP_THRESHOLDS) return SKILL_EXP_THRESHOLDS[level];
+  // Fallback for any level outside the table — geometric extrapolation.
+  return Math.round(100 * Math.pow(2.2, level));
+}
+
+// Vertical tally-bar skill cell. Slot count = maxLevelNormal + passionExtra
+// (mxp from the save is the *extra* slots beyond mxn, not an absolute ceiling).
+// The bar at index `lvl` is the in-progress slot — rendered as a partial fill
+// driven by `exp / threshold`.
 function skillTallyCell(s, name) {
   const lvl = s?.level ?? 0;
   const mxn = s?.maxLevelNormal ?? 0;
-  const mxp = s?.maxLevelPassion ?? 0;
-  const slots = Math.max(mxn, mxp, lvl, 1);
+  const passionExtra = s?.maxLevelPassion ?? 0;
+  const exp = s?.exp ?? 0;
+  const totalSlots = Math.max(mxn + passionExtra, lvl, 1);
+  const thr = expThreshold(lvl);
+  const frac = thr > 0 ? Math.max(0, Math.min(1, exp / thr)) : 0;
+
   const bars = [];
-  for (let i = 0; i < slots; i++) {
+  for (let i = 0; i < totalSlots; i++) {
+    const isPassionSlot = i >= mxn;
     let cls = "bar";
     if (i < lvl) {
-      // filled — but if beyond mxn it's a passion-filled
-      if (i >= mxn) cls += " filled passion";
-      else cls += " filled";
-    } else if (i < mxn) {
-      cls += " empty";
-    } else if (i < mxp) {
+      cls += isPassionSlot ? " filled passion" : " filled";
+    } else if (i === lvl && lvl < (mxn + passionExtra) && exp > 0) {
+      // In-progress slot: partial fill from the bottom up.
+      cls += isPassionSlot ? " partial passion" : " partial";
+    } else if (isPassionSlot) {
       cls += " passion";
     } else {
       cls += " empty";
     }
-    bars.push(`<span class="${cls}"></span>`);
+    const style = (i === lvl && cls.includes("partial")) ? ` style="--frac: ${frac.toFixed(3)};"` : "";
+    bars.push(`<span class="${cls}"${style}></span>`);
   }
-  const title = `${name} · level ${lvl} / max ${mxn}${mxp > mxn ? ` (passion ${mxp})` : ""}`;
+
+  const ceil = mxn + passionExtra;
+  const pct = (frac * 100).toFixed(1);
+  const passionStr = passionExtra > 0 ? ` (+${passionExtra} passion → ${ceil})` : "";
+  const title = `${name} · level ${lvl} / max ${mxn}${passionStr} · exp ${exp} / ${thr} (${pct}%)`;
   const zeroCls = lvl === 0 ? " zero" : "";
   return `<span class="skill-cell${zeroCls}" title="${esc(title)}"><span class="lvl">${lvl}</span><span class="bars">${bars.join("")}</span></span>`;
 }
@@ -545,9 +568,21 @@ function renderFoodStorage() {
     .join("");
 }
 
-// Recipe filter state. Recipe data lands in a future backend update; until
-// then both modes show the same placeholder.
+// Recipe filter state.
 let recipeFilter = "makeable";
+
+// Load /library/recipes once and cache on state. The list never changes for a
+// given game version, so a single fetch per page load is fine.
+async function ensureRecipes() {
+  if (Array.isArray(state.recipes)) return state.recipes;
+  try {
+    const r = await fetch("/library/recipes");
+    state.recipes = r.ok ? await r.json() : [];
+  } catch {
+    state.recipes = [];
+  }
+  return state.recipes;
+}
 
 function renderRecipes() {
   const body = $("recipes-body");
@@ -560,32 +595,140 @@ function renderRecipes() {
       renderRecipes();
     };
   });
-  const recipes = state.snapshot.recipes;
-  if (!Array.isArray(recipes) || recipes.length === 0) {
-    body.innerHTML = `<div class="muted">Recipe data not yet imported — coming in next iteration.</div>`;
+
+  if (!Array.isArray(state.recipes)) {
+    body.innerHTML = `<div class="muted">Loading recipes…</div>`;
+    ensureRecipes().then(renderRecipes);
     return;
   }
-  // Future: filter by makeable based on storage. Wire-up only; backend agent
-  // ships the data shape.
-  body.innerHTML = recipes
-    .map((r) => `<div class="recipe-item">${esc(r.name || "Recipe")}</div>`)
-    .join("");
+
+  // Storage lookup by element_id.
+  const storage = state.snapshot?.storage || [];
+  const onHand = new Map();
+  for (const s of storage) onHand.set(Number(s.elementary_id), s.count);
+
+  // Kitchen-only — the user said "kitchen recipe".
+  const kitchen = state.recipes.filter((r) => r.facility_type === "Kitchen");
+
+  let rows;
+  if (recipeFilter === "makeable") {
+    rows = kitchen
+      .map((r) => {
+        if (!r.inputs?.length) return null;
+        let canMake = Infinity;
+        for (const inp of r.inputs) {
+          const have = onHand.get(Number(inp.element_id)) || 0;
+          const need = inp.count || 1;
+          canMake = Math.min(canMake, Math.floor(have / need));
+        }
+        return canMake > 0 && Number.isFinite(canMake) ? { r, canMake } : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.canMake - a.canMake);
+  } else {
+    rows = kitchen.map((r) => ({ r, canMake: null }));
+  }
+
+  if (rows.length === 0) {
+    body.innerHTML = `<div class="muted">${
+      recipeFilter === "makeable"
+        ? "No kitchen recipe is currently makeable."
+        : "No kitchen recipes available."
+    }</div>`;
+    return;
+  }
+
+  body.innerHTML = rows.map(({ r, canMake }) => recipeCard(r, canMake)).join("");
+
+  // Stretch: clicking an ingredient name scrolls to the matching storage item
+  // (only useful when the Storage tab is rendered; harmless otherwise).
+  body.querySelectorAll(".rc-elem[data-elementary-id]").forEach((el) => {
+    el.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      const id = el.dataset.elementaryId;
+      const target = document.querySelector(`#storage-list .storage-item[data-elementary-id="${id}"]`);
+      if (target) {
+        // Switch to storage tab and scroll.
+        document.querySelector('header nav button[data-view="storage"]').click();
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+        target.classList.add("highlight");
+        setTimeout(() => target.classList.remove("highlight"), 1500);
+      }
+    });
+  });
+}
+
+function recipeCard(r, canMake) {
+  const elem = (e) => `<a class="rc-elem" href="#" data-elementary-id="${esc(e.element_id)}">${esc(e.name)}×${e.count}</a>`;
+  const ins = (r.inputs || []).map(elem).join(", ") || "—";
+  const outs = (r.outputs || []).map(elem).join(", ") || "—";
+  const badge = canMake != null
+    ? `<span class="rc-badge">×${canMake}</span>`
+    : "";
+  const fac = r.facility_type ? `<span class="rc-facility">${esc(r.facility_type)}</span>` : "";
+  return `<div class="recipe-card">
+    <div class="rc-head">
+      <span class="rc-name">${esc(r.name)}</span>
+      ${fac}
+      ${badge}
+    </div>
+    <div class="rc-body">
+      <span class="rc-inputs">${ins}</span>
+      <span class="rc-arrow">→</span>
+      <span class="rc-outputs">${outs}</span>
+    </div>
+  </div>`;
 }
 
 // ===========================================================================
 //  STORAGE VIEW
 // ===========================================================================
 
+// In-game storage filter tab order. Anything not in this list falls into
+// "Other" at the bottom (e.g. null main_cat_name from the backend).
+const STORAGE_CATEGORY_ORDER = [
+  "Food", "Resources", "Construction", "Fabric", "Raw Materials", "Gas / Energy",
+];
+
 function renderStorage() {
   if (!state.snapshot) return;
-  // Group by elementaryId. The backend resolves the human name from
-  // element_defs / text_defs when available, falling back to "Item #ID".
-  const storage = (state.snapshot.storage || []).slice().sort((a, b) => b.count - a.count);
-  const items = storage.filter((s) => s.count > 0);
-  $("storage-count").textContent = `${items.length} items · ${formatNum(items.reduce((sum, s) => sum + s.count, 0))} total units`;
-  $("storage-list").innerHTML = items
-    .map((s) => `<div class="storage-item"><span>${esc(s.name || `Item #${s.elementary_id}`)}</span><span>${formatNum(s.count)}</span></div>`)
-    .join("") || `<div class="muted">No storage observations yet.</div>`;
+  const storage = (state.snapshot.storage || []).filter((s) => s.count > 0);
+  $("storage-count").textContent = `${storage.length} items · ${formatNum(storage.reduce((sum, s) => sum + s.count, 0))} total units`;
+  if (storage.length === 0) {
+    $("storage-list").innerHTML = `<div class="muted">No storage observations yet.</div>`;
+    return;
+  }
+
+  // Bucket by category. Null/unknown → "Other".
+  const buckets = new Map();
+  for (const cat of STORAGE_CATEGORY_ORDER) buckets.set(cat, []);
+  for (const s of storage) {
+    const cat = s.main_cat_name || "Other";
+    if (!buckets.has(cat)) buckets.set(cat, []);
+    buckets.get(cat).push(s);
+  }
+
+  // Render in the fixed order, then any extras (e.g. "Other") at the end.
+  const orderedKeys = [
+    ...STORAGE_CATEGORY_ORDER.filter((k) => buckets.get(k)?.length),
+    ...[...buckets.keys()].filter((k) => !STORAGE_CATEGORY_ORDER.includes(k) && buckets.get(k).length),
+  ];
+
+  const html = orderedKeys.map((cat) => {
+    const items = buckets.get(cat).slice().sort((a, b) =>
+      (a.name || "").localeCompare(b.name || "")
+    );
+    const total = items.reduce((sum, s) => sum + s.count, 0);
+    const rows = items
+      .map((s) => `<div class="storage-item" data-elementary-id="${esc(s.elementary_id)}"><span>${esc(s.name || `Item #${s.elementary_id}`)}</span><span>${formatNum(s.count)}</span></div>`)
+      .join("");
+    return `<div class="storage-category">
+      <h3 class="storage-category-head"><span>${esc(cat)}</span><span class="muted">${formatNum(total)} units</span></h3>
+      <div class="storage-category-items">${rows}</div>
+    </div>`;
+  }).join("");
+
+  $("storage-list").innerHTML = html;
 }
 
 function nutRow(c) {
@@ -691,10 +834,11 @@ function renderGalaxyMap() {
   const ships = state.snapshot.ships || [];
   if (bodies.length === 0) return;
 
-  // Aggregate bodies by system_id, then drop any system that has no visited
-  // body. "Visited" = at least one body in the system has `visited` truthy.
+  // Aggregate bodies by system_id, then keep systems that are visited OR have
+  // at least one scannable body that has been observed (scanned-but-not-
+  // visited). Anything else stays in fog of war.
   const allSystems = aggregateSystems(bodies);
-  const systems = allSystems.filter((s) => s.visited);
+  const systems = allSystems.filter((s) => s.visited || s.scanned);
   if (systems.length === 0) return;
 
   // Player ship trail + current position from the cached path.
@@ -725,6 +869,13 @@ function renderGalaxyMap() {
 
   ensureDefs(svg);
   drawGrid(svg, baseX, baseY, baseW, baseH);
+
+  // Star-jump edges (drawn behind systems but in front of grid). Only show
+  // edges where at least one endpoint is in a system that's been observed —
+  // hides the deep-fog edges entirely.
+  const visibleSystemIds = new Set(systems.map((s) => String(s.system_id)));
+  const bodyById = new Map(bodies.map((b) => [String(b.body_id), b]));
+  drawJumpEdges(svg, state.snapshot.jumpEdges || [], visibleSystemIds, bodyById);
 
   // Player ship trail (drawn behind systems, in front of grid).
   drawPlayerShipTrail(svg, pathPoints, currentPathIdx);
@@ -766,6 +917,26 @@ function currentPathIndex(pathPoints, day) {
     else break;
   }
   return idx < 0 ? 0 : idx;
+}
+
+function drawJumpEdges(svg, edges, visibleSystemIds, bodyById) {
+  for (const e of edges) {
+    const fromVisible = visibleSystemIds.has(String(e.from_system_id));
+    const toVisible = visibleSystemIds.has(String(e.to_system_id));
+    if (!fromVisible && !toVisible) continue;
+    const from = bodyById.get(String(e.from_body_id));
+    const to = bodyById.get(String(e.to_body_id));
+    if (!from || !to || from.x == null || to.x == null) continue;
+    const line = document.createElementNS(SVG_NS, "line");
+    line.setAttribute("x1", from.x);
+    line.setAttribute("y1", from.y);
+    line.setAttribute("x2", to.x);
+    line.setAttribute("y2", to.y);
+    let cls = "jump-edge";
+    if (e.intra) cls += " intra";
+    line.setAttribute("class", cls);
+    svg.appendChild(line);
+  }
 }
 
 function drawPlayerShipTrail(svg, pathPoints, currentIdx) {
@@ -842,6 +1013,7 @@ function aggregateSystems(bodies) {
         bodies: [],
         star: null,
         visited: false,
+        scanned: false,
         anyPresent: false,
         lastSeenDay: 0,
       });
@@ -850,6 +1022,9 @@ function aggregateSystems(bodies) {
     sys.bodies.push(b);
     if (b.type === "Star") sys.star = b;
     if (b.visited) sys.visited = true;
+    // "Scanned" = any body in the system is marked scannable in the latest
+    // observation (the player has observed it from afar via long-range scan).
+    if (b.scannable) sys.scanned = true;
     if (b.present) sys.anyPresent = true;
     if (b.lastSeenDay > sys.lastSeenDay) sys.lastSeenDay = b.lastSeenDay;
   }
@@ -871,9 +1046,10 @@ function aggregateSystems(bodies) {
 
 function drawSystemMarker(svg, sys, isCurrent) {
   const g = document.createElementNS(SVG_NS, "g");
-  // Visited systems are the only ones we render now; "current" is the system
-  // the player ship is in at the slider's day.
-  let cls = "system visited";
+  const scannedOnly = !sys.visited && sys.scanned;
+  let cls = "system";
+  if (sys.visited) cls += " visited";
+  if (scannedOnly) cls += " scanned-only";
   if (isCurrent) cls += " current-system";
   g.setAttribute("class", cls);
   g.setAttribute("data-system-id", sys.system_id);
@@ -884,7 +1060,7 @@ function drawSystemMarker(svg, sys, isCurrent) {
   halo.setAttribute("cy", sys.y);
   halo.setAttribute("r", isCurrent ? 6000 : 4500);
   halo.setAttribute("fill", starColor(sys.star_class));
-  halo.setAttribute("opacity", isCurrent ? 0.28 : 0.15);
+  halo.setAttribute("opacity", isCurrent ? 0.28 : (scannedOnly ? 0.08 : 0.15));
   halo.setAttribute("filter", "url(#glow)");
   g.appendChild(halo);
 
@@ -895,15 +1071,19 @@ function drawSystemMarker(svg, sys, isCurrent) {
   star.setAttribute("r", isCurrent ? 3000 : 2200);
   star.setAttribute("fill", starColor(sys.star_class));
   star.setAttribute("class", "system-star");
+  if (scannedOnly) star.setAttribute("opacity", "0.5");
   g.appendChild(star);
 
   // Visited ring: thin outline. Brighter + thicker for the current system.
-  const ring = document.createElementNS(SVG_NS, "circle");
-  ring.setAttribute("cx", sys.x);
-  ring.setAttribute("cy", sys.y);
-  ring.setAttribute("r", isCurrent ? 4200 : 3200);
-  ring.setAttribute("class", "visited-ring");
-  g.appendChild(ring);
+  // Skipped for scanned-only systems — those get an eye glyph instead.
+  if (sys.visited) {
+    const ring = document.createElementNS(SVG_NS, "circle");
+    ring.setAttribute("cx", sys.x);
+    ring.setAttribute("cy", sys.y);
+    ring.setAttribute("r", isCurrent ? 4200 : 3200);
+    ring.setAttribute("class", "visited-ring");
+    g.appendChild(ring);
+  }
 
   // Hover + click handlers.
   g.addEventListener("mouseenter", (ev) => showTooltip(ev, systemTooltip(sys)));
@@ -991,6 +1171,34 @@ function renderSystemView() {
   overlay.appendChild(label);
 }
 
+// Map a Station:Flavor tag to a fill color. The flavors come from the save's
+// stuff[] strings — Research / Supply / Repair / Trading etc.
+const STATION_COLORS = {
+  Research: "#4cc9ff",
+  Supply: "#f1c40f",
+  Repair: "#e67e22",
+  Trading: "#27ae60",
+  Farming: "#6dd47e",
+  Leisure: "#c66bff",
+  Prison: "#9b3a3a",
+};
+
+// Pick a representative glyph for a body's stuff[]. Returns null if no
+// noteworthy tag is present.
+function bodyStuffGlyph(b) {
+  const stuff = b.stuff || [];
+  if (stuff.includes("WarpGate")) return { glyph: "⊕", color: "#4cc9ff", label: "Warp Gate" };
+  if (stuff.includes("Derelict")) return { glyph: "⚓", color: "#cfd8dc", label: "Derelict" };
+  const station = stuff.find((s) => typeof s === "string" && s.startsWith("Station:"));
+  if (station) {
+    const flavor = station.slice("Station:".length);
+    return { glyph: "⊞", color: STATION_COLORS[flavor] || "#aab0c4", label: `Station: ${flavor}` };
+  }
+  if (stuff.includes("HiddenShip") && b.visited) return { glyph: "👻", color: "#d6c5ff", label: "Hidden Ship" };
+  // ScannableSector is handled as a pulsing cyan outline directly on the body.
+  return null;
+}
+
 function drawSystemBody(svg, b, view) {
   // Body radius scaled to the system viewBox so things stay visible.
   const r = systemBodyRadius(b, view);
@@ -1001,6 +1209,10 @@ function drawSystemBody(svg, b, view) {
   else if (b.type === "Moon") cls += " moon";
   else if (b.type === "AsteroidField") cls += " asteroid-field";
   if (!b.present) cls += " faded";
+  if (b.visited) cls += " visited";
+  const stuff = b.stuff || [];
+  const isScannable = stuff.includes("ScannableSector");
+  if (isScannable) cls += " scannable";
   g.setAttribute("class", cls);
 
   if (b.type === "AsteroidField") {
@@ -1028,6 +1240,55 @@ function drawSystemBody(svg, b, view) {
       c.setAttribute("fill", "#a8b0c4");
     }
     g.appendChild(c);
+
+    // Visited bodies get a brighter outline. Already styled via CSS class.
+    if (b.visited) {
+      const outline = document.createElementNS(SVG_NS, "circle");
+      outline.setAttribute("cx", b.x);
+      outline.setAttribute("cy", b.y);
+      outline.setAttribute("r", r * 1.15);
+      outline.setAttribute("class", "body-visited-outline");
+      g.appendChild(outline);
+    }
+
+    // Scannable: pulsing cyan outline ring.
+    if (isScannable) {
+      const ring = document.createElementNS(SVG_NS, "circle");
+      ring.setAttribute("cx", b.x);
+      ring.setAttribute("cy", b.y);
+      ring.setAttribute("r", r * 1.35);
+      ring.setAttribute("class", "body-scannable-ring");
+      g.appendChild(ring);
+    }
+  }
+
+  // Stuff glyph (Derelict / WarpGate / Station:X / HiddenShip / ...). Drawn in
+  // the upper-right corner of the body so it doesn't cover the body itself.
+  const glyph = bodyStuffGlyph(b);
+  if (glyph) {
+    const off = r * 0.8;
+    const tx = document.createElementNS(SVG_NS, "text");
+    tx.setAttribute("x", b.x + off);
+    tx.setAttribute("y", b.y - off);
+    tx.setAttribute("class", "body-glyph");
+    tx.setAttribute("fill", glyph.color);
+    tx.setAttribute("font-size", Math.max(400, r * 1.0));
+    tx.setAttribute("text-anchor", "middle");
+    tx.setAttribute("dominant-baseline", "middle");
+    tx.textContent = glyph.glyph;
+    g.appendChild(tx);
+  }
+
+  // Body name label below the body.
+  if (b.name && b.type !== "Star") {
+    const lbl = document.createElementNS(SVG_NS, "text");
+    lbl.setAttribute("x", b.x);
+    lbl.setAttribute("y", b.y + r * 1.8);
+    lbl.setAttribute("class", "body-name-label");
+    lbl.setAttribute("text-anchor", "middle");
+    lbl.setAttribute("font-size", Math.max(280, r * 0.55));
+    lbl.textContent = b.name;
+    g.appendChild(lbl);
   }
 
   g.addEventListener("mouseenter", (ev) => showTooltip(ev, bodyTooltip(b)));
@@ -1135,11 +1396,16 @@ function renderSystemLabels(overlay, systems, svg) {
   for (const sys of systems) {
     const sx = offX + (sys.x - vb.x) * scale;
     const sy = offY + (sys.y - vb.y) * scale;
+    const scannedOnly = !sys.visited && sys.scanned;
     const label = document.createElement("div");
-    label.className = "system-label-overlay" + (sys.anyPresent ? "" : " faded");
+    let cls = "system-label-overlay";
+    if (!sys.anyPresent) cls += " faded";
+    if (scannedOnly) cls += " scanned-only";
+    label.className = cls;
     label.style.left = sx + "px";
     label.style.top = (sy + 18) + "px";
-    label.textContent = sys.name;
+    // Scanned-but-not-visited: prepend the "observed-from-afar" eye glyph.
+    label.textContent = (scannedOnly ? "👁 " : "") + sys.name;
     overlay.appendChild(label);
   }
 }
@@ -1192,14 +1458,17 @@ function factionColor(factionId) {
 }
 
 function bodyTooltip(b) {
+  const stuff = b.stuff || [];
   const lines = [
-    `<strong>${esc(b.type)}${b.star_class ? ` (${esc(b.star_class)})` : ""}</strong>`,
+    `<strong>${esc(b.name || b.type)}</strong>`,
+    `type: ${esc(b.type)}${b.star_class ? ` (${esc(b.star_class)})` : ""}`,
     b.system_name ? `system: ${esc(b.system_name)}` : null,
-    `id ${esc(b.body_id)}`,
   ].filter(Boolean);
+  if (stuff.length) lines.push(`stuff: ${stuff.map(esc).join(", ")}`);
+  if (b.scannable) lines.push("<em>scannable</em>");
+  if (b.visited) lines.push("<em>visited</em>");
+  if (b.saved) lines.push("<em>saved</em>");
   if (!b.present) lines.push(`<em>last seen day ${b.lastSeenDay}</em>`);
-  if (b.visited) lines.push("visited");
-  if (b.saved) lines.push("saved");
   return lines.join("<br>");
 }
 
@@ -1418,11 +1687,13 @@ function startSSE() {
   es.addEventListener("hello", () => $("live").classList.remove("off"));
   es.addEventListener("snapshot", async () => {
     state.galaxy.shipPath = null; // invalidate cache; refetch on next render
+    state.recipes = null;         // library may have been re-imported
     await loadDays();
     await ensureShipPath();
+    await ensureRecipes();
     await renderTickMarks();
   });
   es.onerror = () => $("live").classList.add("off");
 }
 
-loadDays().then(ensureShipPath).then(startSSE);
+loadDays().then(ensureShipPath).then(ensureRecipes).then(startSSE);

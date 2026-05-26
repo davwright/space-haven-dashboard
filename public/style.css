@@ -397,6 +397,22 @@ main { height: calc(100% - 44px); }
 .skill-cell .bar.passion { background: #6a4d0a; opacity: 0.55; }   /* potential-passion (empty above natural max) */
 .skill-cell .bar.filled.passion { background: #ff5e1a; }           /* burning-passion filled (orange-red) */
 
+/* In-progress slot: empty bar with a fractional fill rising from the bottom.
+   `--frac` (0..1) is set inline per cell from current exp / threshold. */
+.skill-cell .bar.partial {
+  background: #2a2a2a;
+  position: relative;
+  overflow: hidden;
+}
+.skill-cell .bar.partial::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: calc(var(--frac, 0) * 100%);
+  background: #d4a017;
+}
+.skill-cell .bar.partial.passion::after { background: #ff5e1a; }
+
 /* ====================================================================
    NUTRITION VIEW
    ==================================================================== */
@@ -677,3 +693,127 @@ main { height: calc(100% - 44px); }
 .tick.type-4 { background: var(--happy); }
 .tick.type-5 { background: var(--content); }
 .tick.type-8 { background: var(--major); }
+
+/* ====================================================================
+   STORAGE — grouped by category
+   ==================================================================== */
+.storage-category {
+  margin-bottom: 0.9rem;
+}
+.storage-category-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin: 0 0 0.3rem 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.3px;
+  border-bottom: 1px solid var(--border);
+  padding: 0.2rem 0;
+}
+.storage-category-items {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.3rem 0.6rem;
+}
+.storage-item.highlight {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* ====================================================================
+   NUTRITION — recipe cards
+   ==================================================================== */
+.recipe-card {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.3rem 0.5rem;
+  margin-bottom: 0.3rem;
+  font-size: 0.8rem;
+}
+.recipe-card .rc-head {
+  display: flex; align-items: center; gap: 0.5rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.recipe-card .rc-name { flex: 1; }
+.recipe-card .rc-facility {
+  font-size: 0.7rem; color: var(--text-dim);
+  background: var(--bg-2); border: 1px solid var(--border);
+  padding: 0.05rem 0.35rem; border-radius: 8px;
+}
+.recipe-card .rc-badge {
+  font-size: 0.72rem; color: var(--accent);
+  background: var(--bg-2); border: 1px solid var(--accent-dim);
+  padding: 0.05rem 0.4rem; border-radius: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.recipe-card .rc-body {
+  display: flex; align-items: center; gap: 0.3rem;
+  margin-top: 0.15rem;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  flex-wrap: wrap;
+}
+.recipe-card .rc-arrow { color: var(--accent); }
+.recipe-card .rc-elem {
+  color: var(--text);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--text-dim);
+}
+.recipe-card .rc-elem:hover { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* ====================================================================
+   GALAXY — jump edges + body glyphs + scanned-only systems
+   ==================================================================== */
+#galaxy-svg .jump-edge {
+  stroke: #4cc9ff;
+  stroke-width: 200;
+  fill: none;
+  opacity: 0.4;
+}
+#galaxy-svg .jump-edge.intra {
+  stroke-dasharray: 600 400;
+}
+#galaxy-svg .system.scanned-only .system-star {
+  opacity: 0.5;
+}
+#galaxy-svg .body.visited .body-visited-outline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 60;
+  opacity: 0.75;
+}
+#galaxy-svg .body-scannable-ring {
+  fill: none;
+  stroke: #4cc9ff;
+  stroke-width: 80;
+  stroke-dasharray: 200 200;
+  opacity: 0.8;
+  animation: scannable-pulse 1.8s ease-in-out infinite;
+}
+@keyframes scannable-pulse {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 0.95; }
+}
+#galaxy-svg .body-glyph {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Symbol", "Segoe UI", sans-serif;
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: rgba(0,0,0,0.6);
+  stroke-width: 60;
+  pointer-events: none;
+}
+#galaxy-svg .body-name-label {
+  fill: #b3c4d6;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-weight: 500;
+  paint-order: stroke;
+  stroke: rgba(0,0,0,0.7);
+  stroke-width: 40;
+  pointer-events: none;
+}
+.system-label-overlay.scanned-only {
+  opacity: 0.7;
+  font-style: italic;
+}
