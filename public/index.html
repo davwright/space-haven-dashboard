@@ -12,7 +12,6 @@
     // reach the API without becoming modules themselves.
     import * as Dockview from "https://cdn.jsdelivr.net/npm/dockview-core@1/dist/dockview-core.esm.js";
     window.Dockview = Dockview;
-    window.dispatchEvent(new CustomEvent("dockview-ready"));
   </script>
 </head>
 <body>
@@ -150,6 +149,8 @@
   <script src="state.js"></script>
   <script src="widgets.js"></script>
   <script src="widget-crew-status.js"></script>
+  <script src="widget-food-storage.js"></script>
+  <script src="widget-crops-growing.js"></script>
   <script src="docking.js"></script>
   <script src="app.js"></script>
   <script src="advisor.js"></script>

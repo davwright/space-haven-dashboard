@@ -11,6 +11,18 @@
       }
     },
     {
+      "id": "botany",
+      "name": "Botany",
+      "tree": {
+        "type": "tabgroup",
+        "active": 0,
+        "tabs": [
+          { "widget": "food-storage", "params": {} },
+          { "widget": "crops-growing", "params": {} }
+        ]
+      }
+    },
+    {
       "id": "spreadsheet",
       "name": "Spreadsheet",
       "tree": {
