@@ -264,10 +264,25 @@ function statusRow(c) {
 
 function statCell(key, val, longVal) {
   if (val == null) return `<td class="muted">–</td>`;
+  return `<td>${statBar(key, val, longVal)}</td>`;
+}
+
+// Horizontal stat bar with value overlay. Used in Status tab vitals and the
+// Nutrition tab Health column.
+function statBar(key, val, longVal) {
   const sev = severity(key, val);
   const tr = trend(val, longVal);
   const arrow = tr ? `<span class="trend ${tr}">${tr === "up" ? "▲" : "▼"}</span>` : "";
-  return `<td><span class="stat"><span class="swatch s-${sev}"></span><span class="val">${Math.round(val)}</span>${arrow}</span></td>`;
+  // Fill percent: mood is -100..100, map to 0..100. Everything else 0..100 (clamp).
+  let pct;
+  if (key === "mood") pct = Math.max(0, Math.min(100, (val + 100) / 2));
+  else pct = Math.max(0, Math.min(100, val));
+  const tip = longVal != null ? `${Math.round(val)} (long-term ${Math.round(longVal)})` : `${Math.round(val)}`;
+  return `<span class="stat-bar s-${sev}" title="${tip}">`
+       + `<span class="fill" style="width:${pct}%"></span>`
+       + `<span class="val">${Math.round(val)}</span>`
+       + arrow
+       + `</span>`;
 }
 
 // PSI-inspired condition strip: each crew has a fixed 12 slots that never
@@ -312,11 +327,11 @@ function renderSkills() {
   headCells.push(skillHeaderCell("name", "Name", false));
   headCells.push(`<th class="traits-col">Traits</th>`);
   for (const a of ATTR_COLUMNS) {
-    headCells.push(skillHeaderCell(a.key, a.abbr, false, a.name, "attr-col"));
+    headCells.push(skillHeaderCell(a.key, a.name, false, a.name, "attr-col"));
   }
   for (const c of SKILL_COLUMNS) {
     const cls = "skill-col" + (c.extra ? " skill-extra" : "");
-    headCells.push(skillHeaderCell(c.sk, c.abbr, true, c.name, cls));
+    headCells.push(skillHeaderCell(c.sk, c.name, true, c.name, cls));
   }
   head.innerHTML = headCells.join("");
 
@@ -483,7 +498,68 @@ function renderNutrition() {
     rows = rows.filter((c) => (c.food ?? 100) < 50 || (c.food_long ?? 100) < 30);
   }
 
+  renderFoodStorage();
+  renderRecipes();
   $("nutrition-grid").innerHTML = rows.map(nutRow).join("");
+}
+
+// Food items in storage. Prefers backend flag `food_usage_type === 'Food'`
+// if present; otherwise falls back to a name heuristic. Backend extension
+// pending — once present this picks it up automatically.
+const FOOD_NAME_HINTS = [
+  "food", "algae", "water", "vegetable", "fruit", "meat", "ice",
+  "nuts", "seeds", "bio matter", "root", "iv fluid",
+];
+function isFoodItem(s) {
+  if (s.food_usage_type === "Food") return true;
+  if (s.food_usage_type) return false; // backend supplied a type and it's not Food
+  const name = (s.name || "").toLowerCase();
+  return FOOD_NAME_HINTS.some((h) => name.includes(h));
+}
+
+function renderFoodStorage() {
+  const body = $("food-storage-body");
+  if (!body) return;
+  const storage = state.snapshot.storage || [];
+  const foods = storage.filter((s) => s.count > 0 && isFoodItem(s));
+  foods.sort((a, b) => b.count - a.count);
+  if (foods.length === 0) {
+    body.innerHTML = `<div class="muted">No food in storage.</div>`;
+    return;
+  }
+  body.innerHTML = foods
+    .map((s) => `<div class="food-item">`
+       + `<span class="food-name">${esc(s.name || `Item #${s.elementary_id}`)}</span>`
+       + `<span class="food-count">${formatNum(s.count)}</span>`
+       + `</div>`)
+    .join("");
+}
+
+// Recipe filter state. Recipe data lands in a future backend update; until
+// then both modes show the same placeholder.
+let recipeFilter = "makeable";
+
+function renderRecipes() {
+  const body = $("recipes-body");
+  if (!body) return;
+  // Wire the toggle buttons (idempotent).
+  document.querySelectorAll("#recipes-panel .rt-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.recipeFilter === recipeFilter);
+    btn.onclick = () => {
+      recipeFilter = btn.dataset.recipeFilter;
+      renderRecipes();
+    };
+  });
+  const recipes = state.snapshot.recipes;
+  if (!Array.isArray(recipes) || recipes.length === 0) {
+    body.innerHTML = `<div class="muted">Recipe data not yet imported — coming in next iteration.</div>`;
+    return;
+  }
+  // Future: filter by makeable based on storage. Wire-up only; backend agent
+  // ships the data shape.
+  body.innerHTML = recipes
+    .map((r) => `<div class="recipe-item">${esc(r.name || "Recipe")}</div>`)
+    .join("");
 }
 
 // ===========================================================================
@@ -504,11 +580,15 @@ function renderStorage() {
 
 function nutRow(c) {
   const distress = (c.food ?? 100) < 30 || (c.food_long ?? 100) < 20;
+  const healthBar = c.health != null
+    ? statBar("health", c.health, c.health_long)
+    : `<span class="muted">–</span>`;
   return `<div class="nut-row ${distress ? "distress" : ""}">
     <div class="nut-name">
       ${esc(c.name || c.cid)}
       <span class="sub">food ${Math.round(c.food ?? 0)} · long ${Math.round(c.food_long ?? 0)}</span>
     </div>
+    <div class="nut-health">${healthBar}</div>
     <div class="nut-stack">
       ${nutBarBlock("Stomach", c.nutrition?.stomach)}
       ${nutBarBlock("Belly", c.nutrition?.belly)}

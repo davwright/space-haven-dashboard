@@ -134,6 +134,9 @@ main { height: calc(100% - 44px); }
 }
 .crew-table th.sort-active::after { content: " ↓"; font-size: 0.7rem; }
 .crew-table th.sort-active.asc::after { content: " ↑"; }
+/* Skills tab handles its own sort indicator (numbered, multi-sort), and we
+   don't want the auto-suffix to leak onto rotated headers. */
+.skills-table th.sort-active::after { content: ""; }
 .crew-table tbody tr {
   height: var(--row-height);
   border-bottom: 1px solid var(--border);
@@ -164,6 +167,51 @@ main { height: calc(100% - 44px); }
 }
 .trend.up { color: var(--happy); }
 .trend.dn { color: var(--extreme); }
+
+/* Horizontal stat bar with value overlay (Status + Nutrition tabs).
+   Fill width = percent of the vital, fill color = severity band. */
+.stat-bar {
+  position: relative;
+  display: inline-block;
+  width: 100px;
+  height: 16px;
+  background: var(--bg-3);
+  border-radius: 2px;
+  overflow: visible;
+  vertical-align: middle;
+  margin-right: 16px; /* room for the trend arrow on the right */
+}
+.stat-bar .fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  border-radius: 2px 0 0 2px;
+}
+.stat-bar.s-extreme .fill { background: var(--extreme); }
+.stat-bar.s-major   .fill { background: var(--major); }
+.stat-bar.s-minor   .fill { background: var(--minor); }
+.stat-bar.s-neutral .fill { background: var(--neutral); }
+.stat-bar.s-content .fill { background: var(--content); }
+.stat-bar.s-happy   .fill { background: var(--happy); }
+.stat-bar .val {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  text-align: center;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: #fff;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.7), 0 0 2px rgba(0,0,0,0.5);
+}
+.stat-bar .trend {
+  position: absolute;
+  right: -14px;
+  top: 0;
+  line-height: 16px;
+  font-size: 10px;
+}
 
 /* Severity classes shared across stat swatches and condition icons */
 .s-extreme { color: var(--extreme); }   .swatch.s-extreme { background: var(--extreme); }
@@ -207,6 +255,22 @@ main { height: calc(100% - 44px); }
 /* ====================================================================
    SKILLS TABLE
    ==================================================================== */
+.skills-table td.name,
+.skills-table th.traits-col,
+.skills-table td.traits-col {
+  width: auto;
+  white-space: normal;
+}
+.skills-table th.skill-col,
+.skills-table th.attr-col {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  height: 110px;
+  padding: 6px 2px;
+  text-align: left;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
 .skills-table th.attr-col,
 .skills-table td.attr-col {
   width: 32px;
@@ -214,6 +278,16 @@ main { height: calc(100% - 44px); }
   padding: 0 2px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+.skills-table th.attr-col {
+  text-align: left;       /* visual bottom after rotate */
+  vertical-align: bottom;
+}
+/* Sort indicator inline at the end of the rotated text (visually top). */
+.skills-table th.skill-col .sort-ind,
+.skills-table th.attr-col .sort-ind {
+  display: inline-block;
+  margin-left: 4px;
 }
 .attr-col.attr-0 { color: #6e6e6e; }
 .attr-col.attr-1 { color: #c0392b; }   /* extreme  */
@@ -311,19 +385,74 @@ main { height: calc(100% - 44px); }
 /* ====================================================================
    NUTRITION VIEW
    ==================================================================== */
-.nutrition-grid {
+.nutrition-page {
   flex: 1; overflow: auto;
   padding: 0.6rem 1rem;
+  display: flex; flex-direction: column; gap: 0.8rem;
+}
+.food-top {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.8rem;
+}
+.food-panel {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  display: flex; flex-direction: column;
+  min-height: 140px;
+}
+.food-panel-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.8rem; font-weight: 600;
+  color: var(--accent);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-3);
+  border-radius: 4px 4px 0 0;
+}
+.food-panel-body {
+  padding: 0.5rem 0.7rem;
+  font-size: 0.82rem;
+  max-height: 220px;
+  overflow: auto;
+}
+.food-panel-body .food-item {
+  display: flex; justify-content: space-between;
+  padding: 0.15rem 0;
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+.food-panel-body .food-item:last-child { border-bottom: none; }
+.food-panel-body .food-name { color: var(--text); }
+.food-panel-body .food-count { color: var(--text-dim); }
+.recipe-toggle { display: inline-flex; gap: 0.25rem; }
+.rt-btn {
+  background: var(--bg); border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 0.72rem; padding: 0.1rem 0.45rem;
+  border-radius: 3px; cursor: pointer;
+}
+.rt-btn:hover { color: var(--text); }
+.rt-btn.active {
+  color: var(--accent); border-color: var(--accent-dim);
+  background: var(--bg-2);
+}
+
+.nutrition-grid {
   display: grid; gap: 0.4rem;
 }
 .nut-row {
   display: grid;
-  grid-template-columns: 160px 1fr;
+  grid-template-columns: 160px 116px 1fr;
   gap: 1rem; align-items: center;
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 0.5rem 0.8rem;
+}
+.nut-health {
+  display: flex; align-items: center;
 }
 .nut-stack { display: flex; flex-direction: column; gap: 0.4rem; }
 .nut-row.distress { border-color: var(--extreme); }

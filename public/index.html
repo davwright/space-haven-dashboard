@@ -13,7 +13,7 @@
       <button data-view="skills">Skills</button>
       <button data-view="nutrition">Nutrition</button>
       <button data-view="storage">Storage</button>
-      <button data-view="galaxy">Galaxy</button>
+      <button data-view="galaxy">Map</button>
     </nav>
     <div class="hdr-right">
       <span id="day-pill">Day —</span>
@@ -74,7 +74,25 @@
           <input type="checkbox" id="hunger-only"> show only crew in food distress
         </label>
       </div>
-      <div class="nutrition-grid" id="nutrition-grid"></div>
+      <div class="nutrition-page">
+        <div class="food-top">
+          <div class="food-panel" id="food-storage-panel">
+            <div class="food-panel-head">Food in storage</div>
+            <div class="food-panel-body" id="food-storage-body"></div>
+          </div>
+          <div class="food-panel" id="recipes-panel">
+            <div class="food-panel-head">
+              <span>Kitchen recipes</span>
+              <span class="recipe-toggle">
+                <button class="rt-btn active" data-recipe-filter="makeable">Makeable now</button>
+                <button class="rt-btn" data-recipe-filter="all">All recipes</button>
+              </span>
+            </div>
+            <div class="food-panel-body" id="recipes-body"></div>
+          </div>
+        </div>
+        <div class="nutrition-grid" id="nutrition-grid"></div>
+      </div>
     </section>
 
     <!-- ====== STORAGE VIEW ====== -->
