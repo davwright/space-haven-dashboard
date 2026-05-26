@@ -121,6 +121,49 @@ Same shape as the existing crew data:
   `{ type: "operator-at", component: "NavConsole", skill: "Navigate", level: 5 }`
   (combines presence + skill in one check; the strictest gating)
 
+### Operator at the console — the strictest gate
+
+Many features become available **only while someone is physically
+sitting at the relevant console**. This is the most game-faithful
+gating layer and the one that produces the most interesting
+dashboard dynamics. The crew member walks away → live features go
+dark; they sit back down → features return.
+
+```js
+{ type: "operator-at", component: "NavConsole" }
+// requires only that SOMEONE is at the console — any skill level
+{ type: "operator-at", component: "NavConsole", skill: "Navigate", level: 5 }
+// requires the operator to be a competent navigator
+```
+
+The capability engine checks: for each player crew, find their
+current `x, y` (already in our state tree) and check whether they are
+within the operator-cell footprint of the named component on the
+ship. The save's per-component layout gives us the operator slot
+coords; matching against crew positions is a tight join.
+
+Consequences for widgets:
+
+- **Galaxy map** — visible always, but "Compute jump path" button
+  greys out when no navigator is seated. The label changes to "Seat
+  a Navigation-skilled crew member at the Nav Console."
+- **Weapons readiness** — shows static weapon stats always; live
+  targeting only when a Gunner is at the WeaponConsole.
+- **Trade dashboard** — shows historical trade data always; current
+  trader's full inventory only when an Operations-skilled crew sits
+  at the Trading Terminal.
+- **Medical panel** — current crew vitals always; treatment
+  recommendations only when a Medic is at the MedicalBay.
+
+When the operator leaves → the feature transitions to **lost / stale**
+(NOT white noise — the console is fine, it just has no one driving
+it). The widget shows the last-known result faded out, with "operator
+left N seconds ago." On return → fresh data, controls back to live.
+
+This is the most common transition the user will see in normal play.
+The visual treatment should be subtle and informative, not alarming
+(unlike white noise which IS alarming).
+
 ### Research, resources, etc.
 
 - `{ type: "research", tech: "Hyperdrive" }` — research complete
@@ -230,9 +273,46 @@ sub-states the predicate evaluator can read: `destroyed`,
 `damaged-but-rebuildable`, `unpowered-by-grid-fault`, etc. The
 white-noise vs lost distinction reads these.
 
+#### Boot delay after power restoration
+
+Power doesn't instantly mean "console is back." When a component
+transitions from unpowered → powered (or destroyed → rebuilt → powered),
+it enters a **booting** sub-state for a short period before it's
+`functioning` again.
+
+This makes batteries / UPS modules meaningfully tactical:
+
+- No batteries, reactor takes a hit, all consoles go dark instantly,
+  then take 30+ seconds to come back when power restores. Combat
+  blind during the gap.
+- With batteries / UPS, the consoles stay live across brief outages —
+  no boot delay.
+- A console with batteries goes static AFTER its own battery drains,
+  not when the grid fails.
+
+In the predicate language:
+
+- `state: "booting"` is implicit; widgets requiring `state: "powered"`
+  treat it as met. Widgets requiring `state: "functioning"` treat it
+  as unmet — they go to **lost / stale** (last known data), NOT white
+  noise. Static is reserved for "console was destroyed," not "console
+  is recovering from a power blip."
+- Components expose a `bootProgress` (0–1) the host can render as a
+  loading bar overlay during the booting phase, so the user
+  understands "the console is coming back, just wait."
+- Boot duration is component-specific. NavConsole maybe 15 s.
+  WeaponConsole longer (more sensitive electronics). MedicalBay
+  fastest (you need it back NOW). Constants live in haven; we
+  surface what we read.
+
+The boot-progress state is derived: a component is **booting** if it
+has transitioned to `powered` within the last `bootDuration` ticks
+and `bootProgress` < 1.
+
 #### Audio cue (later)
 
-A short distorted-static sound on transition to white noise would be
+A short distorted-static sound on transition to white noise; a
+descending-then-ascending hum during booting. Both would be
 appropriately dramatic. Defer — silent by default.
 
 ### Lock vs disabled vs static — summary
