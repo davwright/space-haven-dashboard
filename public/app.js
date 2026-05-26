@@ -63,6 +63,11 @@ const ATTR_COLUMNS = [
   { key: "perception",   name: "Perception",   abbr: "Per" },
 ];
 
+// Expose column specs for the crew-skills widget (top-level `const` doesn't
+// attach to window automatically in plain scripts).
+window.SKILL_COLUMNS = SKILL_COLUMNS;
+window.ATTR_COLUMNS = ATTR_COLUMNS;
+
 // ---------------------------------------------------------------------------
 //  Severity bands (six discrete buckets, applied uniformly across stats).
 //  See style.css for the colors.
@@ -394,7 +399,15 @@ function conditionStrip(conditions) {
 
 // Module-level sort state. Each entry: { key, direction }
 // key ∈ { 'name', 'bravery', 'zest', 'intelligence', 'perception', <sk:number> }
-let skillSort = [];
+// Exposed on window so the crew-skills widget can share the same sort with
+// the legacy Skills tab. Backed by an internal box object so both `skillSort`
+// reads and `skillSort = …` reassignments stay in sync via the getter/setter.
+window.__skillSortBox = { entries: [] };
+Object.defineProperty(window, "skillSort", {
+  configurable: true,
+  get() { return window.__skillSortBox.entries; },
+  set(v) { window.__skillSortBox.entries = v; },
+});
 
 function renderSkills() {
   if (!state.snapshot) return;
