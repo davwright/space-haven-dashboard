@@ -12,6 +12,7 @@
       <button data-view="status" class="active">Status</button>
       <button data-view="skills">Skills</button>
       <button data-view="nutrition">Nutrition</button>
+      <button data-view="storage">Storage</button>
       <button data-view="galaxy">Galaxy</button>
     </nav>
     <div class="hdr-right">
@@ -74,8 +75,14 @@
         </label>
       </div>
       <div class="nutrition-grid" id="nutrition-grid"></div>
-      <div class="storage-panel">
-        <h3>Ship storage</h3>
+    </section>
+
+    <!-- ====== STORAGE VIEW ====== -->
+    <section id="view-storage" class="view">
+      <div class="toolbar">
+        <span class="muted" id="storage-count"></span>
+      </div>
+      <div class="storage-page">
         <div id="storage-list" class="storage-list"></div>
       </div>
     </section>

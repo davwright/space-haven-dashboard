@@ -118,6 +118,7 @@ document.querySelectorAll("header nav button").forEach((btn) => {
     if (btn.dataset.view === "status") renderStatus();
     else if (btn.dataset.view === "skills") renderSkills();
     else if (btn.dataset.view === "nutrition") renderNutrition();
+    else if (btn.dataset.view === "storage") renderStorage();
     else if (btn.dataset.view === "galaxy") renderGalaxy();
   });
 });
@@ -157,6 +158,7 @@ async function loadSnapshot(day) {
   if (active.id === "view-status") renderStatus();
   else if (active.id === "view-skills") renderSkills();
   else if (active.id === "view-nutrition") renderNutrition();
+  else if (active.id === "view-storage") renderStorage();
   else if (active.id === "view-galaxy") renderGalaxy();
 }
 
@@ -416,7 +418,8 @@ function skillRow(c) {
     const want = a.key.charAt(0).toUpperCase() + a.key.slice(1);
     const attr = (c.attributes || []).find((x) => x.name === want);
     const pts = attr?.points ?? 0;
-    tds.push(`<td class="attr-col num">${pts}</td>`);
+    const clamp = Math.min(7, Math.max(0, pts));
+    tds.push(`<td class="attr-col attr-${clamp}">${pts}</td>`);
   }
   const skillsBySk = new Map();
   for (const s of c.skills || []) skillsBySk.set(s.sk, s);
@@ -481,13 +484,20 @@ function renderNutrition() {
   }
 
   $("nutrition-grid").innerHTML = rows.map(nutRow).join("");
+}
 
-  // Storage panel — group by elementaryId. The backend resolves the human
-  // name from element_defs / text_defs when available, falling back to
-  // "Item #ID" for unknown ids.
+// ===========================================================================
+//  STORAGE VIEW
+// ===========================================================================
+
+function renderStorage() {
+  if (!state.snapshot) return;
+  // Group by elementaryId. The backend resolves the human name from
+  // element_defs / text_defs when available, falling back to "Item #ID".
   const storage = (state.snapshot.storage || []).slice().sort((a, b) => b.count - a.count);
-  $("storage-list").innerHTML = storage
-    .filter((s) => s.count > 0)
+  const items = storage.filter((s) => s.count > 0);
+  $("storage-count").textContent = `${items.length} items · ${formatNum(items.reduce((sum, s) => sum + s.count, 0))} total units`;
+  $("storage-list").innerHTML = items
     .map((s) => `<div class="storage-item"><span>${esc(s.name || `Item #${s.elementary_id}`)}</span><span>${formatNum(s.count)}</span></div>`)
     .join("") || `<div class="muted">No storage observations yet.</div>`;
 }
@@ -499,30 +509,28 @@ function nutRow(c) {
       ${esc(c.name || c.cid)}
       <span class="sub">food ${Math.round(c.food ?? 0)} · long ${Math.round(c.food_long ?? 0)}</span>
     </div>
-    ${nutBarBlock("Stomach", c.nutrition?.stomach)}
-    ${nutBarBlock("Belly", c.nutrition?.belly)}
+    <div class="nut-stack">
+      ${nutBarBlock("Stomach", c.nutrition?.stomach)}
+      ${nutBarBlock("Belly", c.nutrition?.belly)}
+    </div>
   </div>`;
 }
+
+// Bars are scaled to a fixed reference so the empty space on the right shows
+// what's missing. Each segment width = (value / NUT_MAX) * 100%.
+const NUT_MAX = 100;
 
 function nutBarBlock(label, n) {
   const parts = ["protein", "carbs", "fat", "vitamins", "toxins"];
   const vals = parts.map((k) => Math.max(0, n?.[k] ?? 0));
   const total = vals.reduce((s, v) => s + v, 0);
-  // If empty, draw a faint placeholder bar.
-  if (total <= 0) {
-    return `<div class="nut-bar-block">
-      <div class="nut-bar-label"><span>${label}</span><span>empty</span></div>
-      <div class="nut-bar"></div>
-    </div>`;
-  }
-  // Scale each segment as percent of total (so the bar always fills).
   const segs = parts
     .map((k, i) => ({ k, v: vals[i] }))
     .filter((s) => s.v > 0)
-    .map((s) => `<div class="seg ${s.k}" style="width:${(s.v / total) * 100}%" title="${s.k}: ${s.v.toFixed(2)}"></div>`)
+    .map((s) => `<div class="seg ${s.k}" style="width:${(s.v / NUT_MAX) * 100}%" title="${s.k}: ${s.v.toFixed(2)}"></div>`)
     .join("");
   return `<div class="nut-bar-block">
-    <div class="nut-bar-label"><span>${label}</span><span>${total.toFixed(1)}</span></div>
+    <div class="nut-bar-label"><span>${label}</span><span>${total.toFixed(1)} / ${NUT_MAX}</span></div>
     <div class="nut-bar">${segs}</div>
   </div>`;
 }
