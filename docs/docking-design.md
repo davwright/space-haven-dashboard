@@ -173,7 +173,7 @@ Decomposing the existing UI:
 | `recipes` | Nutrition | Kitchen recipes (makeable/all toggle) |
 | `crops-growing` | Nutrition | Per-bed markers + ETA |
 | `fertility` | Nutrition (new) | Compost/fertilizer/bio matter/corpses |
-| `storage-all` | Storage | Categorised list of every item |
+| `storage-all` | Storage | Categorised list of every item; categories draggable / collapsible / reflow on container resize (see "Widget-internal behaviors") |
 | `map-galaxy` | Map | Galaxy view at top zoom |
 | `map-system` | Map | System detail with orbital rings |
 | `ship-position` | Map | "You are at X" current-system summary |
@@ -332,6 +332,43 @@ Realistic effort: phases 1–2 are 1–2 sittings. Phase 3 (extracting
 - **Pop-out windows?** — dockview supports floating panels. Probably
   nice for a true "secondary monitor as the engineer's console" flow.
   Defer.
+
+## Widget-internal behaviors
+
+Some widgets have rich layouts *inside* their pane that are independent
+of the docking host. These are widget-specific behaviors — the host
+provides the container; the widget owns what happens inside it.
+
+### Storage widget — category panels
+
+The Storage widget renders one panel per category (Food, Resources,
+Construction, Fabric, Raw Materials, Gas / Energy, Other). Each panel
+has its own internal behavior:
+
+- **Collapsible**: header click toggles the panel between expanded
+  (all items visible) and collapsed (just the header bar showing
+  category name + total count). State persists per-widget-instance via
+  the widget's `params` (saved into the workspace layout).
+- **Draggable order**: drag a panel header to reorder categories
+  within the storage widget. The user might want Food first because
+  that's what they care about. Order persists in `params.order`.
+- **Reflow on container resize**: the storage widget uses CSS Grid
+  with `grid-template-columns: repeat(auto-fill, minmax(220px, 1fr))`
+  to wrap categories into columns or rows depending on the pane shape.
+  Narrow vertical pane → single column of stacked categories. Wide
+  pane → multiple columns side by side. The widget observes its own
+  container via `ResizeObserver` and can also adjust per-category
+  internal layout (e.g. item rows wrap to a denser grid when wide).
+
+These behaviors are local to the storage widget. They serialise into
+the widget's `params` (alongside any other per-instance config like
+"only show items with count > 0"). The workspace layout schema doesn't
+need to know about them.
+
+Pattern: any widget with a rich internal layout follows this same
+shape — collapsible sections, drag-to-reorder via the header, observe
+own container for reflow. Future widgets (recipes by facility,
+crew-status filterable subgroups, etc.) can adopt the pattern.
 
 ## Layout schema versioning
 

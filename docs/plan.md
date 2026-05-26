@@ -69,6 +69,12 @@ existing band CSS. ~40 LOC.
 
 ## Backlog — known wants, not started
 
+- **Storage widget internal layout**: categories draggable to reorder,
+  collapsible per-category (header click), reflow on container resize
+  (CSS Grid auto-fill + ResizeObserver). State persists in widget
+  params so the layout survives reload. Pattern reusable by other
+  widgets with rich internal layouts. See docking-design.md →
+  "Widget-internal behaviors".
 - **Notifications widget**: cross-cutting alert feed. Icon + title + body
   (plain text / markdown / HTML / images), severity-banded left rule,
   click body → highlight the referenced data in another widget,
