@@ -992,8 +992,17 @@ function nutIcon(kind) {
   const open = `<svg class="nut-icon" viewBox="0 0 16 16" aria-hidden="true">`;
   const close = `</svg>`;
   switch (kind) {
-    case "carbs": // hexagon (glucose silhouette)
-      return open + `<polygon points="8,2 14,5 14,11 8,14 2,11 2,5" fill="currentColor"/>` + close;
+    case "carbs": // glucose — hollow hexagonal ring (monosaccharide)
+      return open
+        + `<polygon points="8,2 14,5 14,11 8,14 2,11 2,5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>`
+        + close;
+    case "sucrose": // disaccharide — two fused hexagonal rings
+      return `<svg class="nut-icon" viewBox="0 0 22 16" aria-hidden="true">`
+        + `<g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round">`
+          + `<polygon points="6,2 11,4.5 11,11.5 6,14 1,11.5 1,4.5"/>`
+          + `<polygon points="16,2 21,4.5 21,11.5 16,14 11,11.5 11,4.5"/>`
+        + `</g>`
+        + close;
     case "protein": // amino-acid backbone (zigzag with end marks)
       return open
         + `<polyline points="2,12 6,8 10,12 14,8" stroke="currentColor" stroke-width="1.5" fill="none"/>`
