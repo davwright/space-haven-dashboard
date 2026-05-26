@@ -30,6 +30,33 @@
         "active": 0,
         "tabs": [{ "widget": "crew-status", "params": {} }]
       }
+    },
+    {
+      "id": "skills",
+      "name": "Skills",
+      "tree": {
+        "type": "tabgroup",
+        "active": 0,
+        "tabs": [{ "widget": "crew-skills", "params": {} }]
+      }
+    },
+    {
+      "id": "industry",
+      "name": "Industry",
+      "tree": {
+        "type": "tabgroup",
+        "active": 0,
+        "tabs": [{ "widget": "storage-all", "params": {} }]
+      }
+    },
+    {
+      "id": "navigation",
+      "name": "Navigation",
+      "tree": {
+        "type": "tabgroup",
+        "active": 0,
+        "tabs": [{ "widget": "map-galaxy", "params": {} }]
+      }
     }
   ],
   "active": "captain"

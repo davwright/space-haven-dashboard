@@ -875,10 +875,12 @@ function recipeCard(r, canMake) {
     ? `<span class="rc-badge">×${canMake}</span>`
     : "";
   const fac = r.facility_type ? `<span class="rc-facility">${esc(r.facility_type)}</span>` : "";
-  // Recipe ratio bar (backend pending). When `state.snapshot.recipeRatios`
-  // ships, each entry is { element_id: weight }. Map onto input list and
-  // render a segmented bar coloured by ingredient hash.
-  const ratios = state.snapshot?.recipeRatios?.[String(r.recipe_pid ?? r.pid ?? r.id)] || null;
+  // Recipe ratio bar. db.js re-keys snapshot.recipeRatios by the resolved
+  // library recipe_id, so the lookup is just by r.id. Each entry is
+  // { pid, fpid, facility_mid, recipe_id, ratios: { eid: weight }, ... }.
+  // (Fallback to the raw save pid for entries that didn't resolve.)
+  const entry = state.snapshot?.recipeRatios?.[String(r.id)] || null;
+  const ratios = entry?.ratios || null;
   let ratioRow = "";
   if (ratios && r.inputs?.length) {
     const total = Object.values(ratios).reduce((s, v) => s + (Number(v) || 0), 0);
@@ -892,6 +894,26 @@ function recipeCard(r, canMake) {
       ratioRow = `<div class="rc-ratio-bar">${segs}</div>`;
     }
   }
+  // Nutrient profile of the output(s) — what the player actually cares about
+  // when picking a recipe ("does Processed Food give me carbs or protein?").
+  // Each output can carry its own nutrition (from the element's <edible>); a
+  // Process recipe may also override via <customFood>, which we attached as
+  // r.nutrition. Prefer r.nutrition (recipe-specific) when present, fall back
+  // to per-output element nutrition.
+  const outNuts = (r.outputs || [])
+    .map((o) => {
+      const n = r.nutrition || o.nutrition;
+      if (!n) return null;
+      return { name: o.name, nutrition: n };
+    })
+    .filter(Boolean);
+  const nutRows = outNuts
+    .map((o) => `<div class="rc-nut-row">
+        <span class="rc-nut-label">${esc(o.name)}</span>
+        ${nutIconRow(o.nutrition)}
+      </div>`)
+    .join("");
+  const nutBlock = nutRows ? `<div class="rc-nut">${nutRows}</div>` : "";
   return `<div class="recipe-card">
     <div class="rc-head">
       <span class="rc-name">${esc(r.name)}</span>
@@ -903,8 +925,26 @@ function recipeCard(r, canMake) {
       <span class="rc-arrow">→</span>
       <span class="rc-outputs">${outs}</span>
     </div>
+    ${nutBlock}
     ${ratioRow}
   </div>`;
+}
+
+// Compact horizontal icon row for a nutrient profile. Used in recipe cards
+// to show "what this recipe produces, per unit". Different from nutBarBlock
+// (which scales widths to 100 for crew stomach/belly state).
+function nutIconRow(n) {
+  if (!n) return "";
+  return `<div class="rc-nut-icons">`
+    + NUT_PARTS
+      .map((k) => {
+        const v = Number(n[k] ?? 0);
+        if (!Number.isFinite(v) || v === 0) return "";
+        return `<span class="rc-nut-pill ${k}" title="${NUT_LABELS[k]}: ${v}">${nutIcon(k)}<span>${v}</span></span>`;
+      })
+      .filter(Boolean)
+      .join("")
+    + `</div>`;
 }
 
 // ===========================================================================

@@ -204,9 +204,29 @@
   function getActiveWorkspace() { return active; }
   function getWorkspaces() { return workspaces; }
 
+  // Widgets with rich internal state (collapsed sections, custom orders, etc.)
+  // call this when their `ctx.params` mutate so the new values are pushed into
+  // the dockview panel — `api.toJSON()` then captures them on the next save.
+  function persistWidgetParams(nodeId, params) {
+    if (!api || !nodeId) return;
+    const panel = api.getPanel ? api.getPanel(nodeId) : null;
+    if (!panel) return;
+    // dockview's panel.params shape is { widgetId, widgetParams }. Swap in
+    // the new widgetParams; updateParameters re-fires the params event and
+    // marks the layout dirty so the next toJSON() includes them.
+    try {
+      const cur = (panel.params && typeof panel.params === "object") ? panel.params : {};
+      panel.api.updateParameters({ ...cur, widgetParams: params });
+      schedulePersist();
+    } catch (e) {
+      console.warn("persistWidgetParams failed", e);
+    }
+  }
+
   SH.bootDocking = bootDocking;
   SH.getActiveWorkspace = getActiveWorkspace;
   SH.getWorkspaces = getWorkspaces;
+  SH.persistWidgetParams = persistWidgetParams;
   // Test hook: lets the rest of the app force a save.
   SH.persistWorkspaces = persist;
 })();
