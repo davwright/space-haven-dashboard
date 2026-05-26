@@ -600,10 +600,40 @@ function renderNutrition() {
     rows = rows.filter((c) => (c.food ?? 100) < 50 || (c.food_long ?? 100) < 30);
   }
 
+  const legendWrap = $("nut-legend-wrap");
+  if (legendWrap) legendWrap.innerHTML = nutLegendBlock();
   renderFoodStorage();
   renderRecipes();
   renderCrops();
+  renderFertilitySupply();
   $("nutrition-grid").innerHTML = rows.map(nutRow).join("");
+}
+
+// Renders the small fertility-supply summary (compost / fertilizer / bio
+// matter / corpses) into the Crops panel header. Backend may not yet expose
+// these counts — if absent, the line stays empty.
+const FERTILITY_NAME_HINTS = ["compost", "fertilizer", "bio matter", "biomatter", "corpse"];
+function renderFertilitySupply() {
+  const el = $("fertility-supply");
+  if (!el) return;
+  const fertility = state.snapshot.fertility;
+  let parts = [];
+  if (fertility && typeof fertility === "object") {
+    for (const [k, v] of Object.entries(fertility)) {
+      if (v == null || v === 0) continue;
+      parts.push(`${esc(k)} ${formatNum(v)}`);
+    }
+  } else {
+    // Best-effort fallback from storage counts.
+    const storage = state.snapshot.storage || [];
+    for (const s of storage) {
+      const name = (s.name || "").toLowerCase();
+      if (!FERTILITY_NAME_HINTS.some((h) => name.includes(h))) continue;
+      if (!(s.count > 0)) continue;
+      parts.push(`${esc(s.name)} ${formatNum(s.count)}`);
+    }
+  }
+  el.textContent = parts.length ? "Fertility: " + parts.join(" · ") : "";
 }
 
 // Food items in storage. Prefers backend flag `food_usage_type === 'Food'`
@@ -661,31 +691,88 @@ function renderFoodStorage() {
     .join("");
 }
 
+// Stage names in order — total growth (0..1) split into four equal quarters.
+const CROP_STAGES = ["Seedling", "Growing", "Maturing", "Mature"];
+// STAGE_TIME = 1300 ticks per stage in the parser (parse-save.js). At default
+// game speed ~1 tick/sec, that's ~22 min per stage. Total growth 0..1 spans
+// all four stages, so a full crop cycle is ~88 min.
+const STAGE_MINUTES = 22;
+
+function bedETA(growth, stage) {
+  if (stage === "Mature") return "fully grown";
+  const idx = CROP_STAGES.indexOf(stage);
+  if (idx < 0) return "";
+  const stageStart = idx * 0.25;
+  const intoStage = Math.max(0, growth - stageStart);
+  const remainingFrac = Math.max(0, 0.25 - intoStage);
+  // remainingFrac is fraction of total growth; convert to minutes via stage.
+  const minutes = Math.max(1, Math.round((remainingFrac / 0.25) * STAGE_MINUTES));
+  const next = CROP_STAGES[idx + 1] || "Mature";
+  return `~${minutes}m to ${next}`;
+}
+
+function stageSeverityClass(stage) {
+  switch (stage) {
+    case "Seedling":  return "seedling";
+    case "Growing":   return "growing";
+    case "Maturing":  return "maturing";
+    case "Mature":    return "mature";
+    default:          return "growing";
+  }
+}
+
 function renderCrops() {
   const body = $("crops-body");
   if (!body) return;
-  const byElement = state.snapshot.crops?.byElement || {};
-  const entries = Object.entries(byElement);
-  if (entries.length === 0) {
+  const beds = state.snapshot.growBeds || [];
+  if (beds.length === 0) {
     body.innerHTML = `<div class="muted">No grow beds.</div>`;
     return;
   }
-  entries.sort((a, b) => b[1].count - a[1].count);
-  body.innerHTML = entries
-    .map(([eid, info]) => {
-      const avgGrowth = info.count > 0 ? info.totalGrowth / info.count : 0;
-      const pct = Math.round(avgGrowth * 100);
-      return `<div class="crop-item">`
-        + iconImg(eid, info.name)
-        + `<span class="crop-name">${esc(info.name || `Item #${eid}`)}</span>`
-        + `<span class="crop-count">×${info.count}</span>`
-        + `<span class="crop-bar" title="average growth ${pct}%">`
-          + `<span class="crop-bar-fill" style="width:${pct}%"></span>`
-        + `</span>`
-        + `<span class="crop-pct">${pct}%</span>`
-        + `</div>`;
-    })
-    .join("");
+
+  // Group beds by plant_id; fall back to crops.byElement names if a bed lacks
+  // its plant_name (defensive — current backend always supplies one).
+  const byElementMeta = state.snapshot.crops?.byElement || {};
+  const groups = new Map();
+  for (const bed of beds) {
+    const key = String(bed.plant_id);
+    if (!groups.has(key)) {
+      groups.set(key, {
+        plant_id: bed.plant_id,
+        name: bed.plant_name || byElementMeta[key]?.name || `Item #${key}`,
+        beds: [],
+      });
+    }
+    groups.get(key).beds.push(bed);
+  }
+
+  const rows = [...groups.values()].sort((a, b) => b.beds.length - a.beds.length);
+
+  body.innerHTML = rows.map((g) => {
+    const markers = g.beds.map((b) => {
+      const left = Math.max(0, Math.min(100, b.growth * 100));
+      const sev = stageSeverityClass(b.stage);
+      const tip = `Bed (${b.bed_x},${b.bed_y}) · ${b.stage} · ${Math.round(b.growth * 100)}% · ${bedETA(b.growth, b.stage)}`;
+      return `<span class="bed-marker stage-${sev}" style="left:${left.toFixed(1)}%" title="${esc(tip)}"></span>`;
+    }).join("");
+
+    // Tick labels at stage boundaries (25/50/75%).
+    const ticks = `<span class="bed-tick" style="left:25%"></span>`
+                + `<span class="bed-tick" style="left:50%"></span>`
+                + `<span class="bed-tick" style="left:75%"></span>`;
+
+    return `<div class="crop-row">`
+      + `<div class="crop-row-head">`
+        + iconImg(g.plant_id, g.name)
+        + `<span class="crop-name">${esc(g.name)}</span>`
+        + `<span class="crop-count">×${g.beds.length}</span>`
+      + `</div>`
+      + `<div class="bed-track">${ticks}${markers}</div>`
+      + `<div class="bed-stage-labels">`
+        + `<span>Seedling</span><span>Growing</span><span>Maturing</span><span>Mature</span>`
+      + `</div>`
+    + `</div>`;
+  }).join("");
 }
 
 // Recipe filter state.
@@ -788,6 +875,23 @@ function recipeCard(r, canMake) {
     ? `<span class="rc-badge">×${canMake}</span>`
     : "";
   const fac = r.facility_type ? `<span class="rc-facility">${esc(r.facility_type)}</span>` : "";
+  // Recipe ratio bar (backend pending). When `state.snapshot.recipeRatios`
+  // ships, each entry is { element_id: weight }. Map onto input list and
+  // render a segmented bar coloured by ingredient hash.
+  const ratios = state.snapshot?.recipeRatios?.[String(r.recipe_pid ?? r.pid ?? r.id)] || null;
+  let ratioRow = "";
+  if (ratios && r.inputs?.length) {
+    const total = Object.values(ratios).reduce((s, v) => s + (Number(v) || 0), 0);
+    if (total > 0) {
+      const segs = r.inputs.map((inp) => {
+        const w = Number(ratios[String(inp.element_id)] || 0);
+        if (!(w > 0)) return "";
+        const pct = (w / total) * 100;
+        return `<div class="rc-ratio-seg" style="width:${pct.toFixed(1)}%; background:${factionColor(inp.element_id)}" title="${esc(inp.name)} ${(w * 100).toFixed(0)}%"></div>`;
+      }).join("");
+      ratioRow = `<div class="rc-ratio-bar">${segs}</div>`;
+    }
+  }
   return `<div class="recipe-card">
     <div class="rc-head">
       <span class="rc-name">${esc(r.name)}</span>
@@ -799,6 +903,7 @@ function recipeCard(r, canMake) {
       <span class="rc-arrow">→</span>
       <span class="rc-outputs">${outs}</span>
     </div>
+    ${ratioRow}
   </div>`;
 }
 
@@ -879,14 +984,71 @@ function nutRow(c) {
 // what's missing. Each segment width = (value / NUT_MAX) * 100%.
 const NUT_MAX = 100;
 
+// Chemistry-style nutrient glyphs. Each returns a 16x16 inline SVG that
+// inherits `color` via `currentColor`, so the existing --protein / --carbs /
+// etc. CSS variables tint it. Used in nutrient bar segment labels and the
+// legend at the top of the Nutrition tab.
+function nutIcon(kind) {
+  const open = `<svg class="nut-icon" viewBox="0 0 16 16" aria-hidden="true">`;
+  const close = `</svg>`;
+  switch (kind) {
+    case "carbs": // hexagon (glucose silhouette)
+      return open + `<polygon points="8,2 14,5 14,11 8,14 2,11 2,5" fill="currentColor"/>` + close;
+    case "protein": // amino-acid backbone (zigzag with end marks)
+      return open
+        + `<polyline points="2,12 6,8 10,12 14,8" stroke="currentColor" stroke-width="1.5" fill="none"/>`
+        + `<circle cx="2" cy="12" r="1.5" fill="currentColor"/>`
+        + `<circle cx="14" cy="8" r="1.5" fill="currentColor"/>`
+        + close;
+    case "fat": // saturated fatty acid chain (3-ply zigzag)
+      return open
+        + `<polyline points="1,8 3,5 5,8 7,5 9,8 11,5 13,8 15,5" stroke="currentColor" stroke-width="1.2" fill="none"/>`
+        + close;
+    case "vitamins": // multi-ring molecule (five-circle cluster)
+      return open
+        + `<g stroke="currentColor" stroke-width="1" fill="none">`
+          + `<circle cx="8" cy="8" r="2"/>`
+          + `<circle cx="3" cy="8" r="2"/>`
+          + `<circle cx="13" cy="8" r="2"/>`
+          + `<circle cx="8" cy="3" r="2"/>`
+          + `<circle cx="8" cy="13" r="2"/>`
+        + `</g>`
+        + close;
+    case "toxins": // biohazard tri-foil
+      return open
+        + `<g fill="currentColor">`
+          + `<circle cx="8" cy="8" r="1.6"/>`
+          + `<circle cx="8" cy="3.5" r="2.2"/>`
+          + `<circle cx="4" cy="11" r="2.2"/>`
+          + `<circle cx="12" cy="11" r="2.2"/>`
+        + `</g>`
+        + `<circle cx="8" cy="8" r="1.1" fill="#0e1117"/>`
+        + close;
+    default:
+      return "";
+  }
+}
+
+const NUT_PARTS = ["protein", "carbs", "fat", "vitamins", "toxins"];
+const NUT_LABELS = {
+  protein: "Protein", carbs: "Carbs", fat: "Fat", vitamins: "Vitamins", toxins: "Toxins",
+};
+
+function nutLegendBlock() {
+  return `<div class="nut-legend">`
+    + NUT_PARTS.map((k) =>
+        `<span class="nut-legend-item ${k}">${nutIcon(k)}<span>${NUT_LABELS[k]}</span></span>`
+      ).join("")
+    + `</div>`;
+}
+
 function nutBarBlock(label, n) {
-  const parts = ["protein", "carbs", "fat", "vitamins", "toxins"];
-  const vals = parts.map((k) => Math.max(0, n?.[k] ?? 0));
+  const vals = NUT_PARTS.map((k) => Math.max(0, n?.[k] ?? 0));
   const total = vals.reduce((s, v) => s + v, 0);
-  const segs = parts
+  const segs = NUT_PARTS
     .map((k, i) => ({ k, v: vals[i] }))
     .filter((s) => s.v > 0)
-    .map((s) => `<div class="seg ${s.k}" style="width:${(s.v / NUT_MAX) * 100}%" title="${s.k}: ${s.v.toFixed(2)}"></div>`)
+    .map((s) => `<div class="seg ${s.k}" style="width:${(s.v / NUT_MAX) * 100}%" title="${NUT_LABELS[s.k]}: ${s.v.toFixed(2)}">${nutIcon(s.k)}</div>`)
     .join("");
   return `<div class="nut-bar-block">
     <div class="nut-bar-label"><span>${label}</span><span>${total.toFixed(1)} / ${NUT_MAX}</span></div>
