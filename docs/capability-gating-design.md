@@ -164,10 +164,80 @@ This is the most common transition the user will see in normal play.
 The visual treatment should be subtle and informative, not alarming
 (unlike white noise which IS alarming).
 
-### Research, resources, etc.
+### Tech tree — what your civilisation knows how to do
 
-- `{ type: "research", tech: "Hyperdrive" }` — research complete
+The third major axis after skills and components. Research advances
+unlock concepts the ship's computer can reason about at all,
+independent of the crew's skill or whether a console is built.
+
+```js
+{ type: "research", tech: "Hyperdrive" }
+{ type: "research", tech: "AdvancedMedicine" }
+{ type: "research", tech: "Tactics" }
+```
+
+The haven library defines a `<Tech>` and `<TechTree>` block (the
+spacehaven-modloader has already shown how to read this — see
+the earlier annotate.py reference). Extractor extension needed:
+pull tech ids + names + their tree-position into a `tech_defs`
+table; pull researched-tech state per save into snapshots.
+
+Once that lands, rules can combine all three axes:
+
+```js
+// Combat advisor: useful at low skill once Tactics is researched;
+// specific recommendations need higher skill OR Advanced Tactics tech.
+SH.advisor.registerRule({
+  id: "threat-assessment",
+  requires: [
+    { type: "research", tech: "Tactics" },                  // knows the concept
+    { any: [
+      { type: "component", id: "WeaponConsole", state: "powered" },
+      { type: "component", id: "BridgeConsole", state: "powered" },
+    ]},
+  ],
+  featureRequires: {
+    "precise-scoring": [
+      { any: [
+        { type: "skill", skill: "Gunner", level: 6 },
+        { type: "research", tech: "AdvancedTactics" },      // research replaces skill
+      ]},
+    ],
+  },
+});
+```
+
+Note the substitution pattern: **research can replace skill** for some
+features. A novice gunner with Advanced Tactics tech researched can
+do what an expert gunner without that research can. This mirrors how
+the game works: research unlocks better procedures, decision tables,
+threat databases that compensate for inexperienced crew.
+
+Inversely, **skill can sometimes replace tech**: an experienced
+navigator can plot a course manually that a researched
+ManualNavigation tech would automate. Use the `any:` predicate
+freely.
+
+### Resources
+
 - `{ type: "resource", id: 71, min: 10 }` — at least N units of element X
+  in ship storage. Less common; useful for advisor rules that
+  recommend a process requiring specific inputs.
+
+### Three independent axes — summary
+
+A capability requirement can blend:
+
+| Axis | What it represents | Where the data comes from |
+|---|---|---|
+| **Component state** | "do we have the hardware?" — built / powered / functioning / booting | Ship layout in save + power state + damage |
+| **Crew skill / role** | "do we have the operator?" — skill level, profession, seated at console | Crew skill data + crew x,y vs component slots |
+| **Tech / research** | "have we figured this out as a civilisation?" — what concepts the computer can reason about | Researched tech list in save |
+
+A widget or rule typically requires at least one from each axis. The
+omniscience invariant from the top of this doc puts a hard ceiling
+on what the dashboard can ever show; the three capability axes set
+the lower floor that determines what's *currently active*.
 
 ### Composing predicates
 
@@ -175,6 +245,60 @@ The visual treatment should be subtle and informative, not alarming
 - `{ any: [P1, P2] }` — n-of (OR within)
 - `{ not: P }` — inverse
 - `{ all: [P1, P2] }` — explicit AND inside an `any` group
+
+### Example: nutritional advice gated by Medical skill
+
+The advisor's `condition-fixable` rule currently suggests "drafting
+Annika to eat Fruits will clear her Vitamin deficiency anemia." This
+is **medical advice**, not raw data. The ship's computer can only
+give it if someone on board knows what they're talking about.
+
+```js
+SH.advisor.registerRule({
+  id: "condition-fixable",
+  // ...
+  requires: [
+    // Need ANY player crew with Medical ≥ 3 to give nutritional
+    // recommendations at all.
+    { type: "skill", skill: "Medical", level: 3 },
+  ],
+  featureRequires: {
+    // Specific remedy diagnosis ("eat fruits") requires deeper medical
+    // knowledge. Without it the rule still fires, but the body text
+    // degrades to "this condition has a fixable cause" without naming
+    // the remedy.
+    "remedy-suggestion": [
+      { type: "skill", skill: "Medical", level: 5 },
+    ],
+  },
+});
+```
+
+Levels of insight quality by Medical skill:
+- **Medical 0–2** — no nutritional advice rule fires at all. The
+  player sees the condition icon and figures it out themselves.
+- **Medical 3–4** — rule fires, says "X has a condition with a
+  fixable cause; consult a medic."
+- **Medical 5+** — rule fires with the specific remedy: "X has
+  Vitamin deficiency; you have 42 Fruits in storage; drafting X to
+  eat would clear it."
+- **Medical 5+ AND operator at MedicalBay** — adds a "treat now"
+  action button (future capability: write-back to the game would
+  draft the crew member). For now, just shows the recommendation
+  with the operator-presence indicator.
+
+This pattern — **rules emit at lowest skill; specific actionable
+recommendations require higher skill** — generalises beyond medical.
+Combat threat assessment can show "ship in system" at Tactics 1,
+"approximate threat level" at Tactics 3, "specific vulnerability"
+at Tactics 6. Mining advisor can show "asteroid present" at Mining
+1, "estimated yield" at Geology 5.
+
+The advisor engine reads `requires` and `featureRequires` from each
+rule. Rules whose `requires` is unmet don't evaluate at all (saves
+CPU + avoids leaking). Rules whose `featureRequires` is partially
+unmet emit insights that the host renders with the appropriate
+locked-feature visualisation.
 
 ### Example: galaxy map
 

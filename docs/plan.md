@@ -75,13 +75,24 @@ existing band CSS. ~40 LOC.
   the appropriate player-observable flag (`isVisible`, `visited`,
   `scanned`, `inspected`, etc.). The invariant is documented in
   `capability-gating-design.md`.
-- **Capability gating**: future feature. Widgets and rules declare
-  `requires` predicates. Components have three states: **built /
-  powered / functioning**. Players have skill levels. Operators must
-  be AT the console. Locked widgets show as aspirational greyed-out;
-  widgets that LOSE a vital capability (NavConsole destroyed) go to
-  **white-noise static** — the ship's computer literally lost its
-  sensor feed. See `capability-gating-design.md`.
+- **Capability gating**: future feature. Three independent axes:
+  **components** (built / powered / functioning / booting), **crew**
+  (skill level, profession, operator-at-console), **research** (tech
+  unlocked). Widgets and rules declare `requires` against any blend.
+  Locked widgets show greyed-out aspirational; widgets that LOSE a
+  vital component go to **white-noise static**. Operator walking
+  away → graceful "lost / stale." Power restoring → "booting" delay
+  unless batteries. See `capability-gating-design.md`. Canonical
+  first rule to gate: nutritional advice in `condition-fixable`
+  requires Medical ≥ 3 to fire at all, Medical ≥ 5 for specific
+  remedy text.
+- **Tech-tree extractor extension** (prerequisite for the research
+  axis above): extend `scripts/import-library.js` to parse haven's
+  `<Tech>` and `<TechTree>` into `tech_defs` (id, name, tree
+  position, parent deps). Extend `parse-save.js` to capture which
+  techs the player has researched; persist per snapshot. Expose via
+  `/library/tech` and `/history/snapshot/:day → researchedTech`.
+  Modloader's `annotate.py` already shows how to walk these blocks.
 - **Storage widget internal layout**: categories draggable to reorder,
   collapsible per-category (header click), reflow on container resize
   (CSS Grid auto-fill + ResizeObserver). State persists in widget
