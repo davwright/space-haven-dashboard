@@ -4,12 +4,23 @@
   <meta charset="utf-8">
   <title>Space Haven Dashboard</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/dockview-core@1/dist/styles/dockview.css">
+  <script type="module">
+    // dockview-core ships an ESM bundle with no external imports and inlines
+    // its own CSS via styleInject — perfect for the no-build-step rule.
+    // We bridge into a window global so the rest of our plain scripts can
+    // reach the API without becoming modules themselves.
+    import * as Dockview from "https://cdn.jsdelivr.net/npm/dockview-core@1/dist/dockview-core.esm.js";
+    window.Dockview = Dockview;
+    window.dispatchEvent(new CustomEvent("dockview-ready"));
+  </script>
 </head>
 <body>
   <header>
     <h1>Space Haven Dashboard <span id="app-version" class="ver" title="package version">v…</span></h1>
     <nav>
-      <button data-view="status" class="active">Status</button>
+      <button data-view="workspace" class="active">Workspace</button>
+      <button data-view="status">Status</button>
       <button data-view="skills">Skills</button>
       <button data-view="nutrition">Nutrition</button>
       <button data-view="storage">Storage</button>
@@ -25,8 +36,14 @@
 
   <main>
 
+    <!-- ====== WORKSPACE VIEW (docking host — Phase 1+) ====== -->
+    <section id="view-workspace" class="view active">
+      <div id="workspace-bar"><!-- workspace tabs (phase 4) --></div>
+      <div id="workspace-host"></div>
+    </section>
+
     <!-- ====== STATUS VIEW ====== -->
-    <section id="view-status" class="view active">
+    <section id="view-status" class="view">
       <div class="toolbar">
         <label class="toggle">
           <input type="checkbox" id="needs-attention"> needs attention only
@@ -131,6 +148,12 @@
   </main>
 
   <script src="state.js"></script>
+  <script src="widgets.js"></script>
+  <script src="widget-crew-status.js"></script>
+  <script src="docking.js"></script>
   <script src="app.js"></script>
+  <script src="advisor.js"></script>
+  <script src="advisor-rules/mining-opportunity.js"></script>
+  <script src="advisor-rules/condition-fixable.js"></script>
 </body>
 </html>

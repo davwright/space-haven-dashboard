@@ -43,6 +43,20 @@
   SH.rendererMode = "snapshot";
   SH.onRendererModeChange = null; // optional callback(mode)
 
+  // Subscribers fired after every replaceTree and after each applyOps flush.
+  // Widgets register here so they can refresh themselves on snapshot/patch.
+  const treeReplacedSubs = new Set();
+  SH.onTreeReplaced = function onTreeReplaced(fn) {
+    if (typeof fn !== "function") return () => {};
+    treeReplacedSubs.add(fn);
+    return () => treeReplacedSubs.delete(fn);
+  };
+  function fireTreeReplaced() {
+    for (const fn of treeReplacedSubs) {
+      try { fn(); } catch (e) { console.error("onTreeReplaced subscriber failed", e); }
+    }
+  }
+
   // -------------------------------------------------------------------------
   //  Path parsing
   // -------------------------------------------------------------------------
@@ -242,6 +256,7 @@
       for (const entry of entries) list.push({ path, entry });
     }
     fireBindings(list, oldByPath);
+    fireTreeReplaced();
   }
 
   // -------------------------------------------------------------------------
@@ -260,6 +275,7 @@
         try { SH.onRendererModeChange(SH.rendererMode); } catch {}
       }
     }
+    fireTreeReplaced();
   };
 
   // -------------------------------------------------------------------------

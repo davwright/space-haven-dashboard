@@ -2059,4 +2059,31 @@ loadDays()
   .then(ensureShipPath)
   .then(ensureRecipes)
   .then(ensureIconIndex)
-  .then(startSSE);
+  .then(startSSE)
+  .then(bootDockingWhenReady);
+
+// dockview-core arrives via an ESM module tag in index.html — that resolves
+// after the rest of our plain scripts have already executed. We poll briefly
+// then call bootDocking, also wiring the explicit dockview-ready event in case
+// the module is still in-flight.
+function bootDockingWhenReady() {
+  if (typeof SH.bootDocking !== "function") return;
+  if (window.Dockview && window.Dockview.createDockview) {
+    SH.bootDocking();
+    return;
+  }
+  let tries = 0;
+  const tick = () => {
+    if (window.Dockview && window.Dockview.createDockview) {
+      SH.bootDocking();
+      return;
+    }
+    if (++tries > 200) {
+      console.error("dockview never loaded — workspace will not render");
+      return;
+    }
+    setTimeout(tick, 25);
+  };
+  window.addEventListener("dockview-ready", () => SH.bootDocking(), { once: true });
+  tick();
+}

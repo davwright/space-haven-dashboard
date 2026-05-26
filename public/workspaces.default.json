@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "workspaces": [
+    {
+      "id": "captain",
+      "name": "Captain's bridge",
+      "tree": {
+        "type": "tabgroup",
+        "active": 0,
+        "tabs": [{ "widget": "crew-status", "params": {} }]
+      }
+    },
+    {
+      "id": "spreadsheet",
+      "name": "Spreadsheet",
+      "tree": {
+        "type": "tabgroup",
+        "active": 0,
+        "tabs": [{ "widget": "crew-status", "params": {} }]
+      }
+    }
+  ],
+  "active": "captain"
+}
