@@ -73,6 +73,12 @@ function fullSnapshot(snapshotId, gameDay) {
 
   const decorateStuff = (row) => ({
     ...row,
+    // Bodies don't have their own names in Space Haven — only systems do.
+    // The legacy `name` column ended up populated with system_name; suppress
+    // it for non-stars so the map doesn't label every planet/moon/asteroid
+    // with the system name redundantly. For Star bodies we keep it: the
+    // star IS the system's named member.
+    name: row.type === "Star" ? row.name : null,
     stuff: row.stuff_json ? safeJson(row.stuff_json) || [] : [],
     scannable: row.scannable ? 1 : 0,
     stuff_json: undefined, // hide the raw column from the API surface

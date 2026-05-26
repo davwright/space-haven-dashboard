@@ -289,8 +289,11 @@ function bindStatCell(path, barEl, key, longVal) {
       basePct = Math.max(0, Math.min(100, (v + 100) / 2));
     } else {
       basePct = Math.max(0, Math.min(100, v));
-      if (v > 100) overPct = Math.min(50, v - 100);
+      // Overflow: show as a stripe overlay INSIDE the bar (0..100% width),
+      // so it never bleeds onto neighbouring table cells. Cap at v=200.
+      if (v > 100) overPct = Math.min(100, ((v - 100) / 100) * 100);
     }
+    if (overPct > 0) node.classList.add("over"); else node.classList.remove("over");
     if (fill) fill.style.width = `${basePct}%`;
     if (overFill) overFill.style.width = `${overPct}%`;
     if (val) val.textContent = Math.round(v);
@@ -345,7 +348,9 @@ function statBar(key, val, longVal) {
     basePct = Math.max(0, Math.min(100, (val + 100) / 2));
   } else {
     basePct = Math.max(0, Math.min(100, val));
-    if (val > 100) overPct = Math.min(50, val - 100);  // up to +50 over visually
+    // Overflow rendered as an inside-the-bar stripe overlay (0..100% width
+    // of the bar), scaled against a v=200 ceiling. Never bleeds out.
+    if (val > 100) overPct = Math.min(100, ((val - 100) / 100) * 100);
   }
   const overflowAttr = overPct > 0 ? " over" : "";
   const tip = longVal != null

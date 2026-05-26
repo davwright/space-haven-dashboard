@@ -202,19 +202,24 @@ main { height: calc(100% - 44px); }
 .stat-bar.s-content .fill { background: var(--content); }
 .stat-bar.s-happy   .fill { background: var(--happy); }
 
-/* Overflow indicator: value > 100 renders an "over-fill" segment that
-   bleeds out past the right edge in a brighter/striped style so it's
-   visually distinct from a maxed-out bar. */
-.stat-bar.over { box-shadow: 0 0 6px rgba(46, 204, 113, 0.6); }
+/* Overflow indicator: value > 100. The bar stays inside its own box; the
+   overflow shows as a diagonal-stripe overlay INSIDE the filled portion
+   plus a faint green ring, so we never bleed onto neighbouring cells. */
+.stat-bar.over {
+  box-shadow: inset 0 0 0 1px rgba(46, 204, 113, 0.9);
+}
 .stat-bar .over-fill {
   position: absolute;
-  left: 100%; top: 0; bottom: 0;
+  /* over-fill is the diagonal overlay; width set inline (0..100% of the bar). */
+  left: 0; top: 0; bottom: 0;
   background: repeating-linear-gradient(
     -45deg,
-    #2ecc71, #2ecc71 4px,
-    #1abc9c 4px, #1abc9c 8px
+    rgba(46, 204, 113, 0)        0,
+    rgba(46, 204, 113, 0)        3px,
+    rgba(46, 204, 113, 0.85)     3px,
+    rgba(46, 204, 113, 0.85)     6px
   );
-  border-radius: 0 2px 2px 0;
+  pointer-events: none;
 }
 .stat-bar .val {
   position: relative;
