@@ -139,16 +139,20 @@ presets.
 
 ## Default presets
 
-Ship a small set users can start from:
+Ship a small set users can start from. Names mirror Space Haven's own
+profession/department concepts so the mental model carries over:
 
 - **Captain's bridge** — Crew Status + Map + Events tab-grouped on right
-- **Kitchen** — Food storage | Recipes | Crops growing in three vertical
-  splits, plus a tab group of Nutrition by crew at the bottom
-- **Engineer** — Storage by category + Fertility supply + (future) Power /
-  Atmosphere
-- **Galaxy** — Map full-screen with a small tab group below for events
-  and travel history
-- **Spreadsheet** — Crew skills + Storage all-items, side by side
+- **Cook** — Food storage | Kitchen recipes | Crops growing in three
+  vertical splits, plus Nutrition by crew at the bottom
+- **Botany** — Crops growing (full-size) + Fertility supply + Bio matter /
+  Compost flow, plus (future) Grow-bed map overlay
+- **Industry** — Storage by category + Recipes (all facility types) +
+  (future) Power / Atmosphere / Construction queues
+- **Navigation** — Map full-screen with a tab group below for events,
+  travel history, jump-edge topology
+- **Spreadsheet** — Crew skills + Storage all-items side by side, dense
+  Numbers-style data view
 
 Defaults are baked into `public/workspaces.default.json` and copied into
 `localStorage` on first run only. The user can reset to defaults via a
