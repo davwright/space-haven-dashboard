@@ -84,25 +84,168 @@ apply.
 
 Every widget (and possibly every advisor rule) declares a list of
 **capabilities** it requires. The dashboard evaluates which capabilities
-the player currently has by reading the save:
+the player currently has by reading the save.
 
-- **Component presence** — does the ship contain a building of type X?
-  (e.g. `building:NavConsole`, `building:WeaponConsole`, `building:Lab`)
-- **Crew skill** — does ANY player crew member have skill X at level
-  Y or higher? (e.g. `skill:Navigate:5`, `skill:Medical:3`)
-- **Crew profession** — is anyone assigned to profession X with
-  priority ≥ Normal? (e.g. `profession:Medical`)
-- **Research / tech** — is tech X unlocked? (e.g. `tech:Hyperdrive`)
-- **Resource** — does the ship currently have item X in storage above
-  threshold Y? (Less common; more useful for advisor rules than
-  widgets.)
+### Components have three independent states
 
-Capability gating is a small DSL of predicates. If a widget's
-predicate evaluates false, the widget is **locked**: still visible in
-the palette but greyed-out, with a tooltip explaining what's missing.
-If the user already has it on a workspace and then loses the
-capability (crew dies, console destroyed), the widget shows a
-"capability lost" placeholder instead of its content.
+A built component is not the same as a working component. The model
+captures all three so a widget can require exactly the right level:
+
+| State | Meaning | Predicate |
+|---|---|---|
+| **built** | The structure exists on the ship | `{ type: "component", id: "NavConsole", state: "built" }` |
+| **powered** | Built AND has power flow | `{ type: "component", id: "NavConsole", state: "powered" }` |
+| **functioning** | Built + powered + not broken/damaged + atmosphere OK + operator present | `{ type: "component", id: "NavConsole", state: "functioning" }` |
+
+"functioning" is the strict everyday case: the console works right
+now. "built" is loosest: you've put it down but it might be damaged,
+unpowered, in vacuum, or no one's at it.
+
+A widget that wants to ALWAYS render something useful even when the
+console is in disrepair declares `built` and handles the degraded
+case itself. A widget that just needs to call into the system in
+real-time declares `functioning`.
+
+Components default to `state: "functioning"` if not specified — the
+common case.
+
+### Players have skill states
+
+Same shape as the existing crew data:
+
+- **Crew skill** — does ANY player crew member have skill X at level Y
+  or higher? `{ type: "skill", skill: "Navigate", level: 5 }`
+- **Crew profession assigned** — is anyone working that role?
+  `{ type: "profession", role: "Medical", priority: "Normal" }`
+- **Crew at console** — is the operator currently AT the component?
+  `{ type: "operator-at", component: "NavConsole", skill: "Navigate", level: 5 }`
+  (combines presence + skill in one check; the strictest gating)
+
+### Research, resources, etc.
+
+- `{ type: "research", tech: "Hyperdrive" }` — research complete
+- `{ type: "resource", id: 71, min: 10 }` — at least N units of element X
+
+### Composing predicates
+
+- `requires: [P1, P2]` — all required (AND)
+- `{ any: [P1, P2] }` — n-of (OR within)
+- `{ not: P }` — inverse
+- `{ all: [P1, P2] }` — explicit AND inside an `any` group
+
+### Example: galaxy map
+
+```js
+SH.registerWidget({
+  id: "map-galaxy",
+  requires: [
+    // Need the console built AND powered to see the map at all.
+    { type: "component", id: "NavConsole", state: "powered" },
+  ],
+  features: {
+    // Live path calculation needs a skilled crew member AT the
+    // working console.
+    "path-calculation": [
+      { type: "component", id: "NavConsole", state: "functioning" },
+      { type: "operator-at", component: "NavConsole", skill: "Navigate", level: 5 },
+    ],
+    // Showing the system encyclopedia (planet details from prior scans)
+    // just needs the console powered.
+    "system-encyclopedia": [
+      { type: "component", id: "NavConsole", state: "powered" },
+    ],
+  },
+});
+```
+
+This means: with the console built but unpowered → widget shows
+locked. Powered → widget mounts with the map + scanned info, but the
+"calculate path" button is greyed out. Powered + a navigator at the
+console with skill 5+ → path calculation unlocks live.
+
+### Three failure states
+
+The dashboard cares about *why* a capability is unmet, not just that
+it is. Three distinct cases, three distinct UIs:
+
+| State | Cause | Visual |
+|---|---|---|
+| **Locked** | Never had it. Console not built; crew never trained that high. | Greyed-out widget body. Tooltip: "Requires X." Friendly, aspirational. |
+| **Lost** | Had it before, gracefully degraded. Operator just walked off; power dipped briefly. | Widget body shows last known state with a "stale" overlay. Tooltip: "Operator no longer at console — data from N minutes ago." |
+| **Failure / white noise** | Had it, then it broke. Component destroyed, ate a missile, on fire, exploded. | The widget's display **goes to white noise / static**, like a real CRT losing signal. The ship's computer's sensor is GONE; this isn't aspirational, this is a casualty report. |
+
+**The white-noise state is the visceral one.** It's the user's
+emergency signal. Galaxy map widget goes to static → the NavConsole
+just took a hit. Combat widget goes to static → the WeaponConsole is
+slag. Storage widget goes to static → the cargo bay is venting to
+space.
+
+#### White-noise rendering
+
+```css
+.widget-static {
+  position: absolute; inset: 0;
+  background:
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.04) 0 1px, transparent 1px 2px),
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.04) 0 1px, transparent 1px 2px),
+    #050608;
+  pointer-events: auto;  /* user can still click to dismiss */
+  animation: static-flicker 80ms steps(2) infinite;
+}
+.widget-static::before {
+  content: "⚠ SIGNAL LOST";
+  position: absolute; inset: 0;
+  display: grid; place-items: center;
+  color: var(--extreme); font-weight: 700; letter-spacing: 2px;
+  text-shadow: 0 0 8px var(--extreme);
+}
+@keyframes static-flicker {
+  0% { background-position: 0 0; }
+  50% { background-position: 1px -2px; }
+  100% { background-position: -2px 1px; }
+}
+```
+
+Real white-noise pixel-by-pixel render (the proper effect) costs a
+`<canvas>` redrawn at ~30fps. Worth it for the widget that just lost
+its console; cheap-but-fine repeating-gradient version above for the
+default. Each widget can opt into the canvas version if its loss
+matters more.
+
+#### Triggering the static state
+
+The host watches every mounted widget's `requires` continuously
+against `SH.capabilities`. When a previously-met `requires` becomes
+unmet:
+
+- If the cause is "component went from `functioning` → not-built" or
+  "component went from `powered` → unpowered due to damage" or
+  "component is now in `destroyed` state" → **white-noise mode**.
+- If the cause is "operator walked away" or "transient power dip
+  resolved itself" → **lost** mode (stale data).
+- If the widget was never satisfied to begin with → **locked**.
+
+The capability engine tags each `building:*` capability with
+sub-states the predicate evaluator can read: `destroyed`,
+`damaged-but-rebuildable`, `unpowered-by-grid-fault`, etc. The
+white-noise vs lost distinction reads these.
+
+#### Audio cue (later)
+
+A short distorted-static sound on transition to white noise would be
+appropriately dramatic. Defer — silent by default.
+
+### Lock vs disabled vs static — summary
+
+If a widget's `requires` is unmet for the first time, the WIDGET is
+**locked** (cool grey, aspirational). If a previously-mounted widget
+loses a non-critical capability, it goes to **lost / stale** (last
+known, faded). If it loses a **vital** capability (component
+destroyed), it goes to **white noise** — the ship's computer just
+lost its sensor.
+
+If a `features.X` predicate is unmet, only that FEATURE inside the
+widget is greyed; same three sub-states apply at the feature level.
 
 ## Widget contract addition
 

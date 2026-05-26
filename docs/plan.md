@@ -76,9 +76,12 @@ existing band CSS. ~40 LOC.
   `scanned`, `inspected`, etc.). The invariant is documented in
   `capability-gating-design.md`.
 - **Capability gating**: future feature. Widgets and rules declare
-  `requires` predicates (building presence, crew skill level,
-  research). Locked widgets show greyed-out with explanation. See
-  `capability-gating-design.md` for the design.
+  `requires` predicates. Components have three states: **built /
+  powered / functioning**. Players have skill levels. Operators must
+  be AT the console. Locked widgets show as aspirational greyed-out;
+  widgets that LOSE a vital capability (NavConsole destroyed) go to
+  **white-noise static** — the ship's computer literally lost its
+  sensor feed. See `capability-gating-design.md`.
 - **Storage widget internal layout**: categories draggable to reorder,
   collapsible per-category (header click), reflow on container resize
   (CSS Grid auto-fill + ResizeObserver). State persists in widget
