@@ -93,6 +93,10 @@ const server = http.createServer((req, res) => {
     return jsonRes(res, 200, history.playerShipPath());
   }
 
+  if (pathname === "/library/recipes") {
+    return jsonRes(res, 200, history.listRecipes());
+  }
+
   if (pathname === "/status") {
     const days = history.listDays();
     return jsonRes(res, 200, {

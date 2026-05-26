@@ -17,7 +17,7 @@ function listDays() {
 function nearestSnapshotForDay(day) {
   return db
     .prepare(
-      "SELECT snapshot_id, game_day, real_timestamp, save_path, player_ship_x, player_ship_y, player_system_id FROM snapshots WHERE game_day <= ? ORDER BY game_day DESC, snapshot_id DESC LIMIT 1"
+      "SELECT snapshot_id, game_day, real_timestamp, save_path, player_ship_x, player_ship_y, player_system_id, jump_edges_json FROM snapshots WHERE game_day <= ? ORDER BY game_day DESC, snapshot_id DESC LIMIT 1"
     )
     .get(day);
 }
@@ -29,6 +29,7 @@ function snapshotForDay(day) {
   full.playerShipX = snap.player_ship_x;
   full.playerShipY = snap.player_ship_y;
   full.playerSystemId = snap.player_system_id;
+  full.jumpEdges = snap.jump_edges_json ? safeJson(snap.jump_edges_json) || [] : [];
   return full;
 }
 
@@ -48,17 +49,20 @@ function fullSnapshot(snapshotId, gameDay) {
   // Bodies in this exact snapshot
   const currentBodies = db
     .prepare(
-      "SELECT body_id, x, y, type, name, visited, saved, system_id, system_name, star_type, star_class, center_id FROM body_observations WHERE snapshot_id = ?"
+      "SELECT body_id, x, y, type, name, visited, saved, system_id, system_name, star_type, star_class, center_id, stuff_json, scannable FROM body_observations WHERE snapshot_id = ?"
     )
     .all(snapshotId);
 
   const currentIds = new Set(currentBodies.map((b) => b.body_id));
 
-  // Last-seen lookup for bodies observed earlier but missing now
+  // Last-seen lookup for bodies observed earlier but missing now. For each
+  // body we also pull the stuff_json from its latest observation, so the
+  // "lastSeen" entries still show what was there when last visible.
   const earlierRows = db
     .prepare(
       `SELECT bo.body_id, bo.x, bo.y, bo.type, bo.name, bo.visited, bo.saved,
               bo.system_id, bo.system_name, bo.star_type, bo.star_class, bo.center_id,
+              bo.stuff_json, bo.scannable,
               MAX(s.game_day) AS last_seen_day
          FROM body_observations bo
          JOIN snapshots s ON s.snapshot_id = bo.snapshot_id
@@ -67,23 +71,34 @@ function fullSnapshot(snapshotId, gameDay) {
     )
     .all(gameDay);
 
+  const decorateStuff = (row) => ({
+    ...row,
+    stuff: row.stuff_json ? safeJson(row.stuff_json) || [] : [],
+    scannable: row.scannable ? 1 : 0,
+    stuff_json: undefined, // hide the raw column from the API surface
+  });
+
   const bodies = [];
-  for (const b of currentBodies) bodies.push({ ...b, present: true, lastSeenDay: gameDay });
+  for (const b of currentBodies) bodies.push({ ...decorateStuff(b), present: true, lastSeenDay: gameDay });
   for (const e of earlierRows) {
     if (!currentIds.has(e.body_id)) {
       bodies.push({
-        body_id: e.body_id,
-        x: e.x,
-        y: e.y,
-        type: e.type,
-        name: e.name,
-        visited: e.visited,
-        saved: e.saved,
-        system_id: e.system_id,
-        system_name: e.system_name,
-        star_type: e.star_type,
-        star_class: e.star_class,
-        center_id: e.center_id,
+        ...decorateStuff({
+          body_id: e.body_id,
+          x: e.x,
+          y: e.y,
+          type: e.type,
+          name: e.name,
+          visited: e.visited,
+          saved: e.saved,
+          system_id: e.system_id,
+          system_name: e.system_name,
+          star_type: e.star_type,
+          star_class: e.star_class,
+          center_id: e.center_id,
+          stuff_json: e.stuff_json,
+          scannable: e.scannable,
+        }),
         present: false,
         lastSeenDay: e.last_seen_day,
       });
@@ -196,6 +211,82 @@ function timelineTicks() {
     .all();
 }
 
+// Recipe API: each recipe with its inputs + outputs. Process products don't
+// have their own <name tid> (they're transformations, not items), so we
+// synthesise a label "Input → Output" from the resolved element names.
+function listRecipes() {
+  let recipes;
+  try {
+    recipes = db
+      .prepare(
+        `SELECT r.id, r.name, r.facility_type
+           FROM recipe_defs r`
+      )
+      .all();
+  } catch {
+    return []; // library not yet imported
+  }
+  if (recipes.length === 0) return [];
+  const inputs = db
+    .prepare(
+      `SELECT ri.recipe_id, ri.element_id, ri.count, ri.consume_every,
+              t.en AS name, e.type AS element_type
+         FROM recipe_inputs ri
+         LEFT JOIN element_defs e ON e.id = ri.element_id
+         LEFT JOIN text_defs t ON t.tid = e.name_tid`
+    )
+    .all();
+  const outputs = db
+    .prepare(
+      `SELECT ro.recipe_id, ro.element_id, ro.count, ro.produce_every,
+              t.en AS name, e.type AS element_type
+         FROM recipe_outputs ro
+         LEFT JOIN element_defs e ON e.id = ro.element_id
+         LEFT JOIN text_defs t ON t.tid = e.name_tid`
+    )
+    .all();
+  const byId = new Map(recipes.map((r) => [r.id, { ...r, inputs: [], outputs: [] }]));
+  for (const i of inputs) {
+    const r = byId.get(i.recipe_id);
+    if (!r) continue;
+    r.inputs.push({
+      element_id: i.element_id,
+      name: i.name || `Item #${i.element_id}`,
+      type: i.element_type,
+      count: i.count,
+      consume_every: i.consume_every,
+    });
+  }
+  for (const o of outputs) {
+    const r = byId.get(o.recipe_id);
+    if (!r) continue;
+    r.outputs.push({
+      element_id: o.element_id,
+      name: o.name || `Item #${o.element_id}`,
+      type: o.element_type,
+      count: o.count,
+      produce_every: o.produce_every,
+    });
+  }
+  const all = [...byId.values()];
+  for (const r of all) {
+    if (r.name) continue;
+    const ins = r.inputs.map((x) => x.name).join(" + ");
+    const outs = r.outputs.map((x) => x.name).join(" + ");
+    if (ins && outs) r.name = `${ins} → ${outs}`;
+    else if (outs) r.name = `→ ${outs}`;
+    else if (ins) r.name = `${ins} →`;
+    else r.name = `Process #${r.id}`;
+  }
+  return all.sort((a, b) => {
+    // Group by facility first, then by name.
+    const fa = a.facility_type || "~";
+    const fb = b.facility_type || "~";
+    if (fa !== fb) return fa < fb ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+}
+
 function safeJson(s) {
   try {
     return JSON.parse(s);
@@ -217,4 +308,5 @@ module.exports = {
   crewHistory,
   timelineTicks,
   playerShipPath,
+  listRecipes,
 };

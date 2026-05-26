@@ -51,7 +51,7 @@ function stmts() {
         "SELECT td.id, t.en AS name FROM trait_defs td LEFT JOIN text_defs t ON t.tid = td.name_tid WHERE td.id = ?"
       ),
       elementById: db.prepare(
-        "SELECT e.id, e.type, t.en AS name FROM element_defs e LEFT JOIN text_defs t ON t.tid = e.name_tid WHERE e.id = ?"
+        "SELECT e.id, e.type, e.sort_group, e.sort_pos, t.en AS name FROM element_defs e LEFT JOIN text_defs t ON t.tid = e.name_tid WHERE e.id = ?"
       ),
       attrById: db.prepare(
         "SELECT a.id, t.en AS name FROM attribute_defs a LEFT JOIN text_defs t ON t.tid = a.name_tid WHERE a.id = ?"
@@ -65,6 +65,27 @@ function stmts() {
     // Tables don't exist yet (no library imported).
     return null;
   }
+}
+
+// The in-game storage filter labels its tabs by these names. They are NOT in
+// haven.xml as data — Bugbyte hard-codes the labels per <sort s=N> bucket.
+// Verified by sampling representative members of each group against day-56
+// save 2026-05-26: s=1 Energium/Hyperium/Building tools; s=2 Root veggies /
+// Fruits / Artificial meat; s=3 Rubble / Hull Block / Energy block; s=4
+// Fibers / Grains / Chemicals; s=5 Base metals / Ice / Noble metals; s=6
+// Smoke / Power / Heat.
+const SORT_GROUP_NAMES = {
+  1: "Resources",       // refined metals, tools, energy crystals
+  2: "Food",
+  3: "Construction",    // rubble / hull / energy blocks
+  4: "Fabric",          // fibers, grains, chemicals
+  5: "Raw Materials",   // base metals, ice, ore
+  6: "Gas / Energy",    // smoke, power, heat
+};
+
+function sortGroupName(s) {
+  if (s == null) return null;
+  return SORT_GROUP_NAMES[s] || `Group #${s}`;
 }
 
 function safeGet(stmtName, id) {
@@ -91,8 +112,15 @@ function traitInfo(id) {
 
 function elementInfo(id) {
   const r = safeGet("elementById", id);
-  if (!r || !r.name) return { id, name: `Item #${id}` };
-  return { id, name: r.name, type: r.type };
+  if (!r || !r.name) return { id, name: `Item #${id}`, sort_group: null, sort_pos: null, category: null };
+  return {
+    id,
+    name: r.name,
+    type: r.type,
+    sort_group: r.sort_group,
+    sort_pos: r.sort_pos,
+    category: sortGroupName(r.sort_group),
+  };
 }
 
 function attributeInfo(id) {
@@ -179,7 +207,21 @@ function decorateStorage(items) {
   if (!Array.isArray(items)) return items;
   return items.map((s) => {
     const info = elementInfo(Number(s.elementary_id));
-    return { ...s, name: info.name, type: info.type };
+    // `main_cat_name` mirrors the in-game storage filter tab label (Food /
+    // Construction / etc.), derived from <product><sort s=N>. Products are
+    // not linked to <MainCat>/<SubCat> in haven (those are build-menu only),
+    // so we expose the storage-group label here as the closest equivalent.
+    // sub_cat_name stays null because the storage UI in-game has no second
+    // level — there's no data to fill it from.
+    return {
+      ...s,
+      name: info.name,
+      type: info.type,
+      sort_group: info.sort_group,
+      sort_pos: info.sort_pos,
+      main_cat_name: info.category,
+      sub_cat_name: null,
+    };
   });
 }
 
@@ -199,4 +241,6 @@ module.exports = {
   factionName,
   decorateCrew,
   decorateStorage,
+  sortGroupName,
+  SORT_GROUP_NAMES,
 };

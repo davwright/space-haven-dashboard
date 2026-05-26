@@ -136,9 +136,14 @@ const parser = new XMLParser({
     if (jpath === "data.CharacterCondition.condition") return true;
     if (jpath === "data.CharacterTrait.trait") return true;
     if (jpath === "data.Product.product") return true;
+    if (jpath === "data.Product.product.needs.l") return true;
+    if (jpath === "data.Product.product.products.l") return true;
     if (jpath === "data.Faction.faction") return true;
     if (jpath === "data.PersonalitySettings.settings") return true;
     if (jpath === "data.PersonalitySettings.settings.attributes.l") return true;
+    if (jpath === "data.MainCat.cat") return true;
+    if (jpath === "data.SubCat.cat") return true;
+    if (jpath === "data.Element.me") return true;
     return false;
   },
 });
@@ -200,18 +205,131 @@ function parseHaven(xmlBuf) {
   // Inventory items: <Product><product eid="..." type="Elementary" ...>.
   // Crops also live here (type="Crop") and saves reference both flavours via
   // elementaryId, so we capture all products that have a name tid.
+  // Recipes (type="Process") also live here — captured separately below.
   const elements = [];
   const prodList = data.Product?.product || [];
   for (const p of prodList) {
     if (p["@_eid"] == null) continue;
     const nameTid = p.name?.["@_tid"];
     if (nameTid == null) continue;
+    // <sort s="N" p="M"/> is the in-game storage group for inventory items.
+    // s = group bucket (1=tools/energy, 2=food, 3=construction blocks,
+    // 4=fabric/chemicals, 5=raw ores/ice, 6=gas/power); p = sort order within
+    // the group. Verified against day-56 save 2026-05-26.
+    const sortS = p.sort?.["@_s"] != null ? Number(p.sort["@_s"]) : null;
+    const sortP = p.sort?.["@_p"] != null ? Number(p.sort["@_p"]) : null;
     elements.push({
       id: Number(p["@_eid"]),
       name_tid: Number(nameTid),
       desc_tid: p.desc?.["@_tid"] != null ? Number(p.desc["@_tid"]) : null,
       type: p["@_type"] != null ? String(p["@_type"]) : null,
+      sort_group: sortS,
+      sort_pos: sortP,
     });
+  }
+
+  // MainCat / SubCat: build-menu categories. Each <MainCat><cat id name tid/>
+  // is a top-level category (CREW / OBJECTS / etc.); each <SubCat><cat id
+  // order parentMainCat name tid/> belongs to one MainCat. We resolve names
+  // via the texts table denormalised below so reads don't need a JOIN.
+  const mainCats = [];
+  for (const c of data.MainCat?.cat || []) {
+    if (c["@_id"] == null) continue;
+    mainCats.push({
+      id: Number(c["@_id"]),
+      name_tid: c.name?.["@_tid"] != null ? Number(c.name["@_tid"]) : null,
+      order: c["@_order"] != null ? Number(c["@_order"]) : null,
+    });
+  }
+  const subCats = [];
+  for (const c of data.SubCat?.cat || []) {
+    if (c["@_id"] == null) continue;
+    subCats.push({
+      id: Number(c["@_id"]),
+      parent_id: c.mainCat?.["@_id"] != null ? Number(c.mainCat["@_id"]) : null,
+      name_tid: c.name?.["@_tid"] != null ? Number(c.name["@_tid"]) : null,
+      order: c["@_order"] != null ? Number(c["@_order"]) : null,
+    });
+  }
+
+  // <Element><me mid> entries are buildable map elements. Each has an
+  // <objectInfo><subCat id/> that links it to a SubCat. We keep this so the
+  // frontend can show what building category a placed structure belongs to.
+  const buildElements = [];
+  for (const me of data.Element?.me || []) {
+    if (me["@_mid"] == null) continue;
+    const oi = me.objectInfo;
+    if (!oi) continue;
+    const subId = oi.subCat?.["@_id"];
+    if (subId == null) continue;
+    buildElements.push({
+      mid: Number(me["@_mid"]),
+      sub_cat_id: Number(subId),
+      name_tid: oi.name?.["@_tid"] != null ? Number(oi.name["@_tid"]) : null,
+    });
+  }
+
+  // Recipes: every <product type="Process"> with at least one need or one
+  // output. We capture inputs/outputs as separate rows and classify the
+  // facility by the marker tags we see on the product:
+  //   <foodProcessing>      Kitchen / Bar
+  //   composter="true"      Composter
+  //   smelter="true"        Smelter
+  //   scrapper="true" or itemScrapper="true"  Scrapper
+  //   <itemFab cat=>        Item Fabricator
+  //   <difficulty skill=>   fallback hint
+  // Verified against haven libVersion 1.0.1_steam_2 (2026-05-26).
+  const recipes = [];
+  const recipeInputs = [];
+  const recipeOutputs = [];
+  for (const p of prodList) {
+    if (p["@_eid"] == null) continue;
+    if (p["@_type"] !== "Process") continue;
+    const needs = p.needs?.l || [];
+    const outs = p.products?.l || [];
+    if (needs.length === 0 && outs.length === 0) continue;
+    const id = Number(p["@_eid"]);
+    let facility = null;
+    if (p.foodProcessing) {
+      const usage = p.foodProcessing["@_foodUsageType"];
+      facility = usage === "Beverage" ? "Bar" : "Kitchen";
+    } else if (p["@_composter"] === true || p["@_composter"] === "true") {
+      facility = "Composter";
+    } else if (p["@_smelter"] === true || p["@_smelter"] === "true") {
+      facility = "Smelter";
+    } else if (p["@_itemScrapper"] === true || p["@_itemScrapper"] === "true" || p["@_scrapper"] === true || p["@_scrapper"] === "true") {
+      facility = "Scrapper";
+    } else if (p.itemFab) {
+      facility = `ItemFab:${p.itemFab["@_cat"] || ""}`;
+    } else if (p.difficulty?.["@_skill"] && p.difficulty["@_skill"] !== "None") {
+      facility = p.difficulty["@_skill"];
+    }
+    const nameTid = p.name?.["@_tid"] != null ? Number(p.name["@_tid"]) : null;
+    recipes.push({
+      id,
+      name_tid: nameTid,
+      facility_type: facility,
+    });
+    for (const n of needs) {
+      const el = n["@_element"];
+      if (el == null) continue;
+      recipeInputs.push({
+        recipe_id: id,
+        element_id: Number(el),
+        count: n["@_howMuch"] != null ? Number(n["@_howMuch"]) : null,
+        consume_every: n["@_consumeEvery"] != null ? Number(n["@_consumeEvery"]) : null,
+      });
+    }
+    for (const o of outs) {
+      const el = o["@_element"];
+      if (el == null) continue;
+      recipeOutputs.push({
+        recipe_id: id,
+        element_id: Number(el),
+        count: o["@_howMuch"] != null ? Number(o["@_howMuch"]) : null,
+        produce_every: o["@_produceEvery"] != null ? Number(o["@_produceEvery"]) : null,
+      });
+    }
   }
 
   // Attributes: the 4 character attributes (Bravery / Zest / Intelligence /
@@ -250,7 +368,20 @@ function parseHaven(xmlBuf) {
     });
   }
 
-  return { libVersion, conditions, traits, elements, attributes, factions };
+  return {
+    libVersion,
+    conditions,
+    traits,
+    elements,
+    attributes,
+    factions,
+    mainCats,
+    subCats,
+    buildElements,
+    recipes,
+    recipeInputs,
+    recipeOutputs,
+  };
 }
 
 // ---------- DB schema -----------------------------------------------------
@@ -293,7 +424,55 @@ function ensureSchema() {
       id INTEGER PRIMARY KEY,
       name_tid INTEGER, side TEXT
     );
+    CREATE TABLE IF NOT EXISTS main_cat_defs (
+      id INTEGER PRIMARY KEY,
+      name_tid INTEGER,
+      name TEXT,
+      sort_order INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS sub_cat_defs (
+      id INTEGER PRIMARY KEY,
+      parent_id INTEGER,
+      name_tid INTEGER,
+      name TEXT,
+      sort_order INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS build_element_defs (
+      mid INTEGER PRIMARY KEY,
+      sub_cat_id INTEGER,
+      name_tid INTEGER,
+      name TEXT
+    );
+    CREATE TABLE IF NOT EXISTS recipe_defs (
+      id INTEGER PRIMARY KEY,
+      name_tid INTEGER,
+      name TEXT,
+      facility_type TEXT
+    );
+    CREATE TABLE IF NOT EXISTS recipe_inputs (
+      recipe_id INTEGER NOT NULL,
+      element_id INTEGER NOT NULL,
+      count REAL,
+      consume_every REAL,
+      PRIMARY KEY (recipe_id, element_id)
+    );
+    CREATE TABLE IF NOT EXISTS recipe_outputs (
+      recipe_id INTEGER NOT NULL,
+      element_id INTEGER NOT NULL,
+      count REAL,
+      produce_every REAL,
+      PRIMARY KEY (recipe_id, element_id)
+    );
   `);
+
+  // Older databases may have a leaner element_defs schema; extend if needed.
+  ensureColumn("element_defs", "sort_group", "INTEGER");
+  ensureColumn("element_defs", "sort_pos", "INTEGER");
+}
+
+function ensureColumn(table, column, ddl) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  if (!cols.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
 }
 
 // ---------- Top-level import ---------------------------------------------
@@ -316,7 +495,13 @@ function importLibrary(jarPath) {
   console.log("[import-library] parsing haven XML...");
   const t2 = Date.now();
   const haven = parseHaven(entries["library/haven"]);
-  console.log(`[import-library] parsed haven (${Date.now() - t2}ms): libVersion=${haven.libVersion}, ${haven.conditions.length} conditions, ${haven.traits.length} traits, ${haven.elements.length} elements, ${haven.attributes.length} attributes, ${haven.factions.length} factions`);
+  console.log(`[import-library] parsed haven (${Date.now() - t2}ms): libVersion=${haven.libVersion}, ${haven.conditions.length} conditions, ${haven.traits.length} traits, ${haven.elements.length} elements, ${haven.attributes.length} attributes, ${haven.factions.length} factions, ${haven.mainCats.length} mainCats, ${haven.subCats.length} subCats, ${haven.buildElements.length} buildElements, ${haven.recipes.length} recipes (${haven.recipeInputs.length} inputs, ${haven.recipeOutputs.length} outputs)`);
+
+  // Resolve tids → EN names so the new denormalized .name columns can be
+  // populated in a single pass (avoid a JOIN on every read).
+  const textByTid = new Map();
+  for (const t of texts) textByTid.set(t.tid, t.en);
+  const nameOf = (tid) => (tid != null ? textByTid.get(tid) ?? null : null);
 
   // Wipe and reload — we want fresh data on every import.
   const insertTexts = db.prepare(
@@ -326,15 +511,26 @@ function importLibrary(jarPath) {
     "INSERT INTO condition_defs (id, name_tid, desc_tid, color, meta, stackable, only_one, display_on_screen, add_to_log) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
   );
   const insertTrait = db.prepare("INSERT INTO trait_defs (id, name_tid, desc_tid) VALUES (?, ?, ?)");
-  const insertElement = db.prepare("INSERT INTO element_defs (id, name_tid, desc_tid, type) VALUES (?, ?, ?, ?)");
+  const insertElement = db.prepare("INSERT INTO element_defs (id, name_tid, desc_tid, type, sort_group, sort_pos) VALUES (?, ?, ?, ?, ?, ?)");
   const insertAttr = db.prepare("INSERT INTO attribute_defs (id, name_tid, desc_tid) VALUES (?, ?, ?)");
   const insertFaction = db.prepare("INSERT INTO faction_defs (id, name_tid, side) VALUES (?, ?, ?)");
+  const insertMainCat = db.prepare("INSERT INTO main_cat_defs (id, name_tid, name, sort_order) VALUES (?, ?, ?, ?)");
+  const insertSubCat = db.prepare("INSERT INTO sub_cat_defs (id, parent_id, name_tid, name, sort_order) VALUES (?, ?, ?, ?, ?)");
+  const insertBuildElement = db.prepare("INSERT OR REPLACE INTO build_element_defs (mid, sub_cat_id, name_tid, name) VALUES (?, ?, ?, ?)");
+  const insertRecipe = db.prepare("INSERT INTO recipe_defs (id, name_tid, name, facility_type) VALUES (?, ?, ?, ?)");
+  const insertRecipeIn = db.prepare("INSERT OR REPLACE INTO recipe_inputs (recipe_id, element_id, count, consume_every) VALUES (?, ?, ?, ?)");
+  const insertRecipeOut = db.prepare("INSERT OR REPLACE INTO recipe_outputs (recipe_id, element_id, count, produce_every) VALUES (?, ?, ?, ?)");
   const upsertVersion = db.prepare(
     "INSERT OR REPLACE INTO library_version (id, lib_version, jar_mtime, imported_at) VALUES (1, ?, ?, ?)"
   );
 
   const writeAll = db.transaction(() => {
-    db.exec("DELETE FROM text_defs; DELETE FROM condition_defs; DELETE FROM trait_defs; DELETE FROM element_defs; DELETE FROM attribute_defs; DELETE FROM faction_defs;");
+    db.exec(
+      "DELETE FROM text_defs; DELETE FROM condition_defs; DELETE FROM trait_defs;" +
+        " DELETE FROM element_defs; DELETE FROM attribute_defs; DELETE FROM faction_defs;" +
+        " DELETE FROM main_cat_defs; DELETE FROM sub_cat_defs; DELETE FROM build_element_defs;" +
+        " DELETE FROM recipe_defs; DELETE FROM recipe_inputs; DELETE FROM recipe_outputs;"
+    );
     for (const t of texts) {
       insertTexts.run(t.tid, t.pid, t.en, t.de, t.fr, t.es, t.it, t.pl, t.cn, t.cs, t.ja, t.ko, t.ptbr, t.ru, t.tr);
     }
@@ -342,9 +538,15 @@ function importLibrary(jarPath) {
       insertCondition.run(c.id, c.name_tid, c.desc_tid, c.color, c.meta, c.stackable, c.only_one, c.display_on_screen, c.add_to_log);
     }
     for (const t of haven.traits) insertTrait.run(t.id, t.name_tid, t.desc_tid);
-    for (const e of haven.elements) insertElement.run(e.id, e.name_tid, e.desc_tid, e.type);
+    for (const e of haven.elements) insertElement.run(e.id, e.name_tid, e.desc_tid, e.type, e.sort_group, e.sort_pos);
     for (const a of haven.attributes) insertAttr.run(a.id, a.name_tid, a.desc_tid);
     for (const f of haven.factions) insertFaction.run(f.id, f.name_tid, f.side);
+    for (const mc of haven.mainCats) insertMainCat.run(mc.id, mc.name_tid, nameOf(mc.name_tid), mc.order);
+    for (const sc of haven.subCats) insertSubCat.run(sc.id, sc.parent_id, sc.name_tid, nameOf(sc.name_tid), sc.order);
+    for (const be of haven.buildElements) insertBuildElement.run(be.mid, be.sub_cat_id, be.name_tid, nameOf(be.name_tid));
+    for (const r of haven.recipes) insertRecipe.run(r.id, r.name_tid, nameOf(r.name_tid), r.facility_type);
+    for (const ri of haven.recipeInputs) insertRecipeIn.run(ri.recipe_id, ri.element_id, ri.count, ri.consume_every);
+    for (const ro of haven.recipeOutputs) insertRecipeOut.run(ro.recipe_id, ro.element_id, ro.count, ro.produce_every);
     upsertVersion.run(haven.libVersion, Math.floor(jarStat.mtimeMs), Date.now());
   });
 
@@ -352,7 +554,7 @@ function importLibrary(jarPath) {
 
   const dateStr = new Date(jarStat.mtimeMs).toISOString().slice(0, 10);
   console.log(
-    `[import-library] Imported ${texts.length} text entries, ${haven.conditions.length} conditions, ${haven.traits.length} traits, ${haven.elements.length} elements, ${haven.attributes.length} attributes, ${haven.factions.length} factions from libVersion ${haven.libVersion} (jar from ${dateStr}).`
+    `[import-library] Imported ${texts.length} text entries, ${haven.conditions.length} conditions, ${haven.traits.length} traits, ${haven.elements.length} elements, ${haven.attributes.length} attributes, ${haven.factions.length} factions, ${haven.mainCats.length} mainCats, ${haven.subCats.length} subCats, ${haven.buildElements.length} buildElements, ${haven.recipes.length} recipes from libVersion ${haven.libVersion} (jar from ${dateStr}).`
   );
 
   return {
@@ -365,6 +567,10 @@ function importLibrary(jarPath) {
       elements: haven.elements.length,
       attributes: haven.attributes.length,
       factions: haven.factions.length,
+      mainCats: haven.mainCats.length,
+      subCats: haven.subCats.length,
+      buildElements: haven.buildElements.length,
+      recipes: haven.recipes.length,
     },
   };
 }

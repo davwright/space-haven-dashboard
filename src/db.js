@@ -138,4 +138,104 @@ ensureColumn("snapshots", "player_ship_x", "INTEGER");
 ensureColumn("snapshots", "player_ship_y", "INTEGER");
 ensureColumn("snapshots", "player_system_id", "TEXT");
 
+// Per-body in-game "what's here" cues: <stuff><s type="Derelict"/>… The list
+// is stored as JSON so the frontend can render icons; the `scannable` mirror
+// flag lets us SELECT WHERE scannable=1 without unpacking JSON.
+ensureColumn("body_observations", "stuff_json", "TEXT");
+ensureColumn("body_observations", "scannable", "INTEGER DEFAULT 0");
+
+// Snapshot-level hyperspace jump graph (one row covers all edges for that
+// snapshot). The shape rarely changes within a save, but a player-built
+// hyperspace gate could add edges, so we still record per-snapshot.
+ensureColumn("snapshots", "jump_edges_json", "TEXT");
+
+// ----- Insert interception ------------------------------------------------
+//
+// ingest.js is intentionally not edited here (parallel agent rules), but we
+// still need to populate the new columns (body_observations.stuff_json,
+// body_observations.scannable, snapshots.jump_edges_json) when ingest writes
+// a snapshot. We intercept the two specific INSERT statements ingest prepares
+// and, immediately after .run() succeeds, issue a follow-up UPDATE pulling
+// the extras out of the side-channel map populated by parse-save.js.
+//
+// Identification is by literal SQL text — these statements come from ingest
+// verbatim. If ingest's INSERT shape ever changes, the wrapper falls back to
+// the unmodified statement (extras simply aren't applied). Verified against
+// the day-56 real save 2026-05-26.
+
+const INSERT_BODY_SQL =
+  "INSERT INTO body_observations (snapshot_id, body_id, x, y, type, name, visited, saved, system_id, system_name, star_type, star_class, center_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+const INSERT_SNAPSHOT_SQL =
+  "INSERT INTO snapshots (game_day, real_timestamp, save_path, body_hash, player_ship_x, player_ship_y, player_system_id) VALUES (?, ?, ?, ?, ?, ?, ?)";
+
+const _rawPrepare = db.prepare.bind(db);
+const _updateBodyExtras = _rawPrepare(
+  "UPDATE body_observations SET stuff_json = ?, scannable = ? WHERE snapshot_id = ? AND body_id = ?"
+);
+const _updateSnapshotJumps = _rawPrepare(
+  "UPDATE snapshots SET jump_edges_json = ? WHERE snapshot_id = ?"
+);
+const _lookupSavePath = _rawPrepare("SELECT save_path FROM snapshots WHERE snapshot_id = ?");
+
+function loadExtras() {
+  // Lazy require to avoid a load-order issue: parse-save.js doesn't depend on
+  // db.js, but server.js loads both and we can't rely on order.
+  try {
+    return require("./parse-save")._extras;
+  } catch {
+    return null;
+  }
+}
+
+db.prepare = function wrappedPrepare(sql) {
+  const stmt = _rawPrepare(sql);
+  if (sql === INSERT_BODY_SQL) {
+    return {
+      run: (...args) => {
+        const r = stmt.run(...args);
+        // args[0]=snapshot_id, args[1]=body_id. The body INSERT itself
+        // doesn't carry save_path, so we look it up from the snapshots row
+        // we just inserted in the same transaction. Cheap: PK lookup.
+        const snapshotId = args[0];
+        const bodyId = String(args[1]);
+        try {
+          const row = _lookupSavePath.get(snapshotId);
+          const savePath = row ? row.save_path : null;
+          if (savePath) {
+            const payload = loadExtras()?.get(savePath);
+            const bx = payload?.bodies?.get(bodyId);
+            if (bx) _updateBodyExtras.run(bx.stuff_json, bx.scannable, snapshotId, bodyId);
+          }
+        } catch {
+          // Best-effort: never break an ingest because extras are missing.
+        }
+        return r;
+      },
+      get: (...args) => stmt.get(...args),
+      all: (...args) => stmt.all(...args),
+    };
+  }
+  if (sql === INSERT_SNAPSHOT_SQL) {
+    return {
+      run: (...args) => {
+        const r = stmt.run(...args);
+        const savePath = args[2]; // matches the INSERT column order
+        const snapshotId = r.lastInsertRowid;
+        try {
+          const payload = loadExtras()?.get(savePath);
+          if (payload && payload.jump_edges_json) {
+            _updateSnapshotJumps.run(payload.jump_edges_json, snapshotId);
+          }
+        } catch {
+          // Best-effort.
+        }
+        return r;
+      },
+      get: (...args) => stmt.get(...args),
+      all: (...args) => stmt.all(...args),
+    };
+  }
+  return stmt;
+};
+
 module.exports = db;

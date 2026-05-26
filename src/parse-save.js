@@ -126,6 +126,10 @@ function extractBodies(gameDoc) {
         const type = b["@_type"];
         if (!BODY_TYPES.has(type)) continue;
         const info = b.info || {};
+        // <stuff><s type="Derelict"/><s type="ScannableSector"/><s type="Station" flav="Research"/>…
+        // gives the player rich "what's here" cues. We flatten to a list of
+        // strings: bare type, or "type:flav" if the <s> has a flav attribute.
+        const stuff = extractStuff(b.stuff);
         bodies.push({
           body_id: String(b["@_id"]),
           system_id: systemId,
@@ -142,6 +146,8 @@ function extractBodies(gameDoc) {
           visited: asBool(info["@_visited"]) ? 1 : 0,
           saved: asBool(info["@_saved"]) ? 1 : 0,
           deleted: asBool(info["@_deleted"]) ? 1 : 0,
+          stuff,
+          scannable: stuff.some((s) => s.startsWith("ScannableSector")) ? 1 : 0,
         });
       }
     }
@@ -153,6 +159,19 @@ function extractBodies(gameDoc) {
   const seen = new Map();
   for (const b of visible) if (!seen.has(b.body_id)) seen.set(b.body_id, b);
   return [...seen.values()];
+}
+
+function extractStuff(container) {
+  if (!container || typeof container !== "object") return [];
+  const arr = Array.isArray(container.s) ? container.s : container.s ? [container.s] : [];
+  const out = [];
+  for (const s of arr) {
+    const t = s["@_type"];
+    if (!t) continue;
+    const flav = s["@_flav"];
+    out.push(flav ? `${t}:${flav}` : String(t));
+  }
+  return out;
 }
 
 // ----- Ships and crew -----
@@ -459,6 +478,43 @@ function extractStorage(gameDoc) {
   return [...totals.entries()].map(([elementary_id, count]) => ({ elementary_id, count }));
 }
 
+// ----- Star jumps (hyperspace network) -----
+//
+// The save's <starmap><slines><s s1 sy1 s2 sy2 [w] [bs] [ips] [mp]/> list IS
+// the hyperspace jump graph. Each <s> is one edge:
+//   sy1 / sy2  system ids (matching <l systemId> elements in <systems>)
+//   s1 / s2    body ids INSIDE those systems (typically the AsteroidField
+//              that the hyperjump arrives at within each system)
+// We expose edges as system→system pairs, deduplicated by unordered system
+// pair to drop reverse duplicates the game writes for both directions.
+function extractJumpEdges(gameDoc) {
+  const edges = [];
+  const seen = new Set();
+  walk(gameDoc, (node) => {
+    if (!node.slines || typeof node.slines !== "object") return;
+    const arr = Array.isArray(node.slines.s) ? node.slines.s : node.slines.s ? [node.slines.s] : [];
+    for (const s of arr) {
+      const sy1 = s["@_sy1"] != null ? String(s["@_sy1"]) : null;
+      const sy2 = s["@_sy2"] != null ? String(s["@_sy2"]) : null;
+      if (!sy1 || !sy2) continue;
+      // Intra-system edges (sy1==sy2) are in-particle-system shortcuts, not
+      // interstellar jumps — frontend doesn't draw those, but we still pass
+      // them through with intra=1 so the API caller can filter.
+      const key = sy1 < sy2 ? `${sy1}|${sy2}` : `${sy2}|${sy1}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      edges.push({
+        from_system_id: sy1,
+        to_system_id: sy2,
+        from_body_id: s["@_s1"] != null ? String(s["@_s1"]) : null,
+        to_body_id: s["@_s2"] != null ? String(s["@_s2"]) : null,
+        intra: sy1 === sy2 ? 1 : 0,
+      });
+    }
+  });
+  return edges;
+}
+
 // ----- Standalone ships/ files -----
 
 function extractStandaloneShips(shipsDir) {
@@ -553,6 +609,7 @@ function parseSaveFolder(folder) {
   );
 
   const storage = extractStorage(gameDoc);
+  const jumpEdges = extractJumpEdges(gameDoc);
   const timeline = timelineDoc ? extractTimeline(timelineDoc) : { events: [], currentDay: 0 };
 
   return {
@@ -563,6 +620,7 @@ function parseSaveFolder(folder) {
     standaloneShips,
     crew,
     storage,
+    jumpEdges,
     timelineEvents: timeline.events,
     playerShipId,
     playerShipName,
@@ -572,7 +630,44 @@ function parseSaveFolder(folder) {
   };
 }
 
+// Side-channel keyed by savePath. Carries data that the existing ingest
+// statements don't pass through (stuff_json + scannable per body, and
+// jump_edges_json per snapshot). db.js wraps the relevant INSERTs to UPDATE
+// these columns immediately after the row is written.
+const _extras = new Map();
+
+function _setExtras(savePath, payload) {
+  _extras.set(savePath, payload);
+}
+function _getExtras(savePath) {
+  return _extras.get(savePath) || null;
+}
+function _clearExtras(savePath) {
+  _extras.delete(savePath);
+}
+
+// Wrap parseSaveFolder to stash the extras for db.js to pick up.
+const _originalParseSaveFolder = parseSaveFolder;
+function parseSaveFolderWithExtras(folder) {
+  const r = _originalParseSaveFolder(folder);
+  if (r) {
+    const byBody = new Map();
+    for (const b of r.bodies) {
+      byBody.set(String(b.body_id), {
+        stuff_json: b.stuff && b.stuff.length ? JSON.stringify(b.stuff) : null,
+        scannable: b.scannable || 0,
+      });
+    }
+    _setExtras(r.savePath, {
+      bodies: byBody,
+      jump_edges_json: r.jumpEdges && r.jumpEdges.length ? JSON.stringify(r.jumpEdges) : null,
+    });
+  }
+  return r;
+}
+
 module.exports = {
-  parseSaveFolder,
-  _internals: { walk, readXml, hexToString, flattenCrew, extractBodies },
+  parseSaveFolder: parseSaveFolderWithExtras,
+  _internals: { walk, readXml, hexToString, flattenCrew, extractBodies, extractJumpEdges, extractStuff },
+  _extras: { set: _setExtras, get: _getExtras, clear: _clearExtras },
 };
