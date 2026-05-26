@@ -86,6 +86,16 @@ existing band CSS. ~40 LOC.
   first rule to gate: nutritional advice in `condition-fixable`
   requires Medical ≥ 3 to fire at all, Medical ≥ 5 for specific
   remedy text.
+- **Capabilities browser widget** (`capabilities-browser`): a new
+  widget that inverts the gating model — shows the full set of
+  capabilities the dashboard knows about, grouped by tech / component
+  / crew skill, with the current player's status against each.
+  "Research Hyperdrive to unlock the jump-planner widget"; "Train
+  Andrew to Medical 5 to get specific remedy suggestions." Click a
+  line to focus the relevant widget (if mounted) or see what'd unlock
+  it. Each widget + rule declares an `unlocks:` one-liner so the
+  browser is self-documenting. See `capability-gating-design.md` →
+  "Inverting the lens — capabilities AS roadmap."
 - **Tech-tree extractor extension** (prerequisite for the research
   axis above): extend `scripts/import-library.js` to parse haven's
   `<Tech>` and `<TechTree>` into `tech_defs` (id, name, tree

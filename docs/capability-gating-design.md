@@ -585,6 +585,171 @@ widgets stay locked.
   tracked; building presence is one extractor extension away. No new
   game-state plumbing needed in steady state.
 
+## Inverting the lens — capabilities AS roadmap
+
+Because every widget and rule declares its `requires`, we have a
+machine-readable map of "what could this dashboard do, if the ship had
+the right stuff?" That data deserves its own surface.
+
+### The Capabilities widget
+
+A new widget — `capabilities-browser` — that flips the relationship.
+Instead of asking "given my ship, what works?" it asks "given the
+dashboard's full feature set, what would each upgrade unlock?"
+
+The widget reads `SH.listWidgets()` + `SH.advisor.listRules()`
+(once exposed), collects every `requires` predicate, and renders
+them grouped by the capability they reference:
+
+```
+TECH TREE                          STATUS         UNLOCKS
+
+Hyperdrive                         🔒 unresearched
+  └─ system-encyclopedia widget                   (passive)
+  └─ jump-planner widget                          (active when at NavConsole)
+
+Tactics                            ✅ researched
+  └─ threat-assessment rule                       (passive; +precise scoring at skill 6)
+  └─ engagement-window rule                       (active when at WeaponConsole)
+
+Advanced Medicine                  🔒 unresearched
+  └─ condition-fixable rule (specific remedies)   (currently shows generic-only)
+  └─ injury-untreated rule                        (locked entirely)
+
+COMPONENTS
+
+NavConsole                         🔒 not built
+  └─ map-galaxy widget                            (locked)
+  └─ ship-position widget                         (locked)
+
+WeaponConsole                      ⚠ damaged
+  └─ threat-assessment rule       (degraded — running on backup; precise scoring lost)
+
+MedicalBay                         ✅ functioning
+  └─ condition-fixable rule
+  └─ injury-untreated rule (when researched)
+
+CREW SKILLS
+
+Medical ≥ 5                        ⚠ best is 4 (Andrew)
+  └─ condition-fixable rule        (running, but degraded — no specific remedy text)
+
+Navigate ≥ 5                       ✅ Annika (5), Julienne (5)
+  └─ map-galaxy:path-calculation   (unlocks when at NavConsole)
+
+Gunner ≥ 6                         🔒 best is 2 (Jackson)
+  └─ threat-assessment:precise-scoring
+```
+
+Each line is interactive:
+
+- Click an unmet capability → the widget explains what the player
+  would need to do in-game (research X, build Y, train Z).
+- Click an unlocked feature → focuses the widget/rule that provides
+  it. ("Show me the map-galaxy widget" → docking host pops it to
+  front or offers to add it to the workspace.)
+- Hover → tooltip summarising the feature.
+
+### Implementation primitives
+
+For this widget to be data-driven, we need a couple of extensions to
+the widget + rule contracts:
+
+#### 1. Human-readable predicate strings
+
+The predicate language is already structured; we add a small
+formatter so the widget can render "Medical ≥ 5" instead of dumping
+JSON:
+
+```js
+SH.formatRequirement({ type: "skill", skill: "Medical", level: 5 })
+// → "Medical ≥ 5"
+
+SH.formatRequirement({ type: "component", id: "NavConsole", state: "powered" })
+// → "Navigation Console (powered)"
+
+SH.formatRequirement({ any: [{type:"skill",skill:"Navigate",level:5},{type:"research",tech:"ManualNavigation"}] })
+// → "Navigate ≥ 5 OR Manual Navigation tech"
+```
+
+#### 2. Widget/rule self-description
+
+Each widget already has `name` + `description`. We add a short
+**`unlocks`** field — a one-line description of what the widget
+DOES that the capabilities browser shows next to it:
+
+```js
+SH.registerWidget({
+  id: "map-galaxy",
+  name: "Galaxy Map",
+  unlocks: "View scanned star systems with travel history overlay",
+  requires: [{ type: "component", id: "NavConsole", state: "powered" }],
+  features: {
+    "path-calculation": {
+      unlocks: "Compute optimal jump routes between systems",
+      requires: [{ type: "operator-at", component: "NavConsole", skill: "Navigate", level: 5 }],
+    },
+  },
+});
+```
+
+Per-feature `unlocks` lets the capability browser show "you have
+the map already, the upgrade unlocks path calculation specifically."
+
+#### 3. Reverse index — capability → features that depend on it
+
+The Capabilities widget walks all widgets + rules, builds a map of
+`requirementKey → [feature]` where `requirementKey` is a canonical
+string like `tech:Tactics` or `component:NavConsole:powered`. Then
+it groups by capability for display.
+
+This is pure data manipulation — no game-state needed beyond the
+already-loaded registries.
+
+#### 4. Hooks for the docking host
+
+When the user clicks a feature in the capability browser:
+- If the widget is mounted in the active workspace → focus it
+  (`SH.focusWidget(widgetId)` already implied by the design)
+- If the widget exists but isn't mounted → offer "Add to workspace?"
+  via a modal/confirmation
+- If the widget is locked → already greyed; the click instead shows
+  the requirements panel
+
+### Why this matters
+
+Without the Capabilities widget, the dashboard's locked widgets are
+isolated "you can't have this yet" messages. With it, the player
+sees the **whole horizon** of what the ship's computer could become.
+It turns the dashboard into a research-and-development meta-game:
+"if I research Advanced Medicine, what does that get me on the
+dashboard?" — answered in one place.
+
+It also makes the dashboard self-documenting. New widgets that
+declare `unlocks` automatically appear in the capabilities browser
+without any registration step beyond the widget contract.
+
+### Order of operations
+
+1. The capability engine ships (without UI) — every widget can
+   already declare `requires`.
+2. The Capabilities widget ships as a read-only viewer reading
+   from existing registries. Even before any widget has a
+   `requires`, it shows them all as "always available."
+3. As widgets get gated, the browser starts showing locked
+   states meaningfully.
+4. Tech-tree extractor lands → research axis populates.
+5. Component-state extractor lands → component axis populates.
+6. Now the browser is showing the full progression map and
+   becomes a primary planning tool.
+
+This is also the natural place to surface the **omniscience
+invariant** at runtime: each widget could declare what data it
+reads from the player's observations, and the browser could show
+"you'd see this once you've inspected at least one trader ship"
+or "you'd see this after scanning your first asteroid field."
+Defer until needed.
+
 ## Open questions
 
 - **Does the player want a "god mode" toggle to bypass gating?** For
