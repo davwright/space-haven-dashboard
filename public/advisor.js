@@ -154,9 +154,12 @@
     return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
 
-  // Default subscriber: render toasts. The future notifications widget will
-  // also subscribe and ideally suppress these toasts when mounted.
+  // Default subscriber: render toasts. The notifications widget sets a
+  // window flag when at least one instance is mounted; we skip toast
+  // rendering while that's true so we don't duplicate the same insights
+  // in the corner AND in the dock.
   subscribe(({ added, removed }) => {
+    if (window.SH_NOTIFICATIONS_WIDGET_MOUNTED) return;
     for (const i of added) renderToast(i);
     for (const id of removed) clearToast(id);
   });

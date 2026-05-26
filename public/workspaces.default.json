@@ -7,7 +7,10 @@
       "tree": {
         "type": "tabgroup",
         "active": 0,
-        "tabs": [{ "widget": "crew-status", "params": {} }]
+        "tabs": [
+          { "widget": "crew-status", "params": {} },
+          { "widget": "notifications", "params": {} }
+        ]
       }
     },
     {

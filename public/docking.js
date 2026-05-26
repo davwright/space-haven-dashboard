@@ -240,7 +240,108 @@
     }
   }
 
+  // Add a widget from the registry to the current workspace. Generates a
+  // unique panel id so the same widget can be added multiple times.
+  function addWidgetToWorkspace(widgetId, params) {
+    if (!api) return null;
+    const ws = active || { id: "scratch" };
+    let n = 1;
+    let pid;
+    do {
+      pid = `${ws.id}-${widgetId}-${Date.now()}-${n++}`;
+    } while (api.getPanel && api.getPanel(pid));
+    return api.addPanel({
+      id: pid,
+      component: "sh-widget",
+      title: widgetTitle(widgetId),
+      params: { widgetId, widgetParams: params || {} },
+    });
+  }
+
   SH.bootDocking = bootDocking;
+  SH.addWidgetToWorkspace = addWidgetToWorkspace;
+  SH.widgetTitle = widgetTitle;
+
+  // ----- Add-widget palette -----
+  //
+  // A small dropdown next to the "+ Add widget" button. Lists every
+  // registered widget grouped by category; clicking an entry adds it to
+  // the current workspace via addWidgetToWorkspace.
+
+  function paintPalette() {
+    const list = document.getElementById("widget-palette-list");
+    if (!list) return;
+    const defs = (SH.listWidgets ? SH.listWidgets() : []).slice();
+    defs.sort((a, b) =>
+      (a.category || "").localeCompare(b.category || "") ||
+      a.name.localeCompare(b.name)
+    );
+    list.innerHTML = defs.map((d) => {
+      const icon = d.icon ? `<span class="wp-icon">${escHtml(d.icon)}</span>` : `<span class="wp-icon"></span>`;
+      const cat = d.category ? `<span class="wp-cat">${escHtml(d.category)}</span>` : "";
+      const desc = d.description ? `<span class="wp-desc">${escHtml(d.description)}</span>` : "";
+      return `<div class="wp-item" data-widget-id="${escHtml(d.id)}">
+        ${icon}
+        <span class="wp-item-text">
+          <span class="wp-name">${escHtml(d.name)}</span>
+          ${desc}
+        </span>
+        ${cat}
+      </div>`;
+    }).join("");
+    list.querySelectorAll(".wp-item").forEach((el) => {
+      el.addEventListener("click", () => {
+        addWidgetToWorkspace(el.dataset.widgetId, {});
+        closePalette();
+      });
+    });
+  }
+
+  function togglePalette() {
+    const el = document.getElementById("widget-palette");
+    if (!el) return;
+    if (el.classList.contains("hidden")) {
+      paintPalette();
+      el.classList.remove("hidden");
+    } else {
+      el.classList.add("hidden");
+    }
+  }
+
+  function closePalette() {
+    const el = document.getElementById("widget-palette");
+    if (el) el.classList.add("hidden");
+  }
+
+  function escHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  // Wire button + click-away. Idempotent (safe to call twice).
+  function wirePaletteUI() {
+    const btn = document.getElementById("add-widget-btn");
+    if (btn && !btn._wired) {
+      btn._wired = true;
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        togglePalette();
+      });
+    }
+    if (!document._palette_clickaway) {
+      document._palette_clickaway = true;
+      document.addEventListener("click", (e) => {
+        const el = document.getElementById("widget-palette");
+        if (!el || el.classList.contains("hidden")) return;
+        if (!el.contains(e.target)) closePalette();
+      });
+    }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", wirePaletteUI);
+  } else {
+    wirePaletteUI();
+  }
   SH.getActiveWorkspace = getActiveWorkspace;
   SH.getWorkspaces = getWorkspaces;
   SH.persistWidgetParams = persistWidgetParams;

@@ -37,7 +37,13 @@
 
     <!-- ====== WORKSPACE VIEW (docking host — Phase 1+) ====== -->
     <section id="view-workspace" class="view active">
-      <div id="workspace-bar"><!-- workspace tabs (phase 4) --></div>
+      <div id="workspace-bar">
+        <button id="add-widget-btn" title="Add a widget to this workspace">+ Add widget</button>
+        <div id="widget-palette" class="hidden">
+          <div class="wp-head">Widgets</div>
+          <div id="widget-palette-list"></div>
+        </div>
+      </div>
       <div id="workspace-host"></div>
     </section>
 
@@ -154,6 +160,7 @@
   <script src="widget-crew-skills.js"></script>
   <script src="widget-storage-all.js"></script>
   <script src="widget-map-galaxy.js"></script>
+  <script src="widget-notifications.js"></script>
   <script src="docking.js"></script>
   <script src="app.js"></script>
   <script src="advisor.js"></script>

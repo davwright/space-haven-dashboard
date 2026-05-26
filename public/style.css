@@ -1005,12 +1005,109 @@ main > .view.active { display: flex; }
 .advisor-toast .t-body { margin-top: 4px; color: var(--text-dim); line-height: 1.3; }
 @keyframes slide-in { from { transform: translateX(20%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 
+/* ---- Notifications widget ---- */
+.widget-notifications { display: flex; flex-direction: column; height: 100%; }
+.widget-notifications .notif-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0.4rem 0.7rem;
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8rem; font-weight: 600; color: var(--accent);
+}
+.widget-notifications .notif-body { flex: 1; overflow: auto; padding: 0.4rem 0.6rem; }
+.notif-empty { padding: 1rem; text-align: center; }
+.notif-card {
+  background: var(--bg-3); border: 1px solid var(--border);
+  border-left: 3px solid var(--neutral);
+  border-radius: 4px; padding: 6px 8px;
+  margin-bottom: 0.4rem;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.notif-card:hover { background: var(--bg-2); }
+.notif-card.sev-info     { border-left-color: var(--content); }
+.notif-card.sev-warning  { border-left-color: var(--minor); }
+.notif-card.sev-critical { border-left-color: var(--extreme); }
+.notif-card.sev-success  { border-left-color: var(--happy); }
+.notif-card .ni-row { display: flex; align-items: center; gap: 6px; font-size: 0.82rem; font-weight: 600; }
+.notif-card .ni-icon { font-size: 1rem; }
+.notif-card .ni-title { flex: 1; }
+.notif-card .ni-dismiss {
+  background: none; border: none; color: var(--text-dim);
+  font-size: 1rem; cursor: pointer; padding: 0 4px; line-height: 1;
+}
+.notif-card .ni-dismiss:hover { color: var(--text); }
+.notif-card .ni-body { margin-top: 3px; color: var(--text-dim); font-size: 0.76rem; line-height: 1.3; }
+
+/* Flash effect when a notification's highlight target is focused. */
+.notif-flash {
+  animation: notif-flash 1.2s ease-out;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+@keyframes notif-flash {
+  0%   { outline-color: var(--accent); box-shadow: 0 0 12px var(--accent); }
+  100% { outline-color: transparent; box-shadow: none; }
+}
+
 /* =========================================================================
    Workspace view (dockview host) + widget chrome.
    ========================================================================= */
 
 #view-workspace { padding: 0; }
-#workspace-bar { display: none; /* phase 4: multi-workspace tabs */ }
+#workspace-bar {
+  position: relative;
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 4px 8px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.82rem;
+}
+#add-widget-btn {
+  background: var(--bg-3);
+  border: 1px solid var(--accent-dim);
+  color: var(--accent);
+  padding: 3px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.78rem;
+}
+#add-widget-btn:hover { background: var(--bg); color: var(--text); }
+#widget-palette {
+  position: absolute; top: 100%; left: 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+  z-index: 100;
+  min-width: 260px;
+  max-height: 480px;
+  overflow: auto;
+}
+#widget-palette.hidden { display: none; }
+#widget-palette .wp-head {
+  padding: 6px 10px;
+  font-size: 0.72rem;
+  text-transform: uppercase; letter-spacing: 0.6px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+}
+.wp-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+}
+.wp-item:last-child { border-bottom: none; }
+.wp-item:hover { background: var(--bg-3); }
+.wp-item .wp-icon { font-size: 1.1rem; width: 18px; text-align: center; }
+.wp-item .wp-name { font-weight: 500; }
+.wp-item .wp-desc { color: var(--text-dim); font-size: 0.72rem; }
+.wp-item-text { display: flex; flex-direction: column; flex: 1; }
+.wp-item .wp-cat {
+  background: var(--bg-3); padding: 1px 6px; border-radius: 8px;
+  font-size: 0.66rem; color: var(--text-dim); border: 1px solid var(--border);
+}
 #workspace-host {
   flex: 1;
   min-height: 0;
