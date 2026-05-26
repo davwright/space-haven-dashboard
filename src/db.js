@@ -215,6 +215,67 @@ function loadExtras() {
   }
 }
 
+// ----- pid → recipe_id resolution -----------------------------------------
+//
+// The save's <prod pid="N"> uses a runtime-allocated unique id (sequential
+// with surrounding entity ids — pid 850 sits between id 849 and id 851). That
+// pid does NOT match haven's <product eid=N> for the Process recipe. To make
+// the frontend able to match recipeRatios entries to /library/recipes rows,
+// we resolve each save pid against the library at write-time:
+//
+//   1. Use the save's <food><n id="X"/> set (the engine's canonical ingredient
+//      list for that prod) as the lookup key.
+//   2. Match against recipe_inputs.element_id sets in the library.
+//   3. If exactly one recipe matches, that's the resolved recipe_id.
+//   4. If multiple match (e.g. two recipes share inputs but differ by
+//      facility), surface them all — the frontend filters by facility_type.
+//   5. If none match (recipe not in the library, e.g. some Bar variants), the
+//      entry stays keyed by pid only.
+//
+// The output is the same shape as before but with a `recipe_id` field on each
+// entry when resolved, AND the top-level object is keyed by recipe_id (when
+// resolved) so the frontend's `recipeRatios[r.id]` lookup just works. Original
+// pid is kept inside the entry for debugging.
+function resolveRecipeRatios(ratios) {
+  if (!ratios || typeof ratios !== "object") return ratios;
+  let recipesByKey = null;
+  try {
+    const rows = _rawPrepare(
+      "SELECT recipe_id, element_id FROM recipe_inputs ORDER BY recipe_id, element_id"
+    ).all();
+    recipesByKey = new Map();
+    let curRid = null, curIns = [];
+    const flush = () => {
+      if (curRid == null || curIns.length === 0) return;
+      const key = curIns.slice().sort((a, b) => a - b).join(",");
+      if (!recipesByKey.has(key)) recipesByKey.set(key, []);
+      recipesByKey.get(key).push(curRid);
+    };
+    for (const r of rows) {
+      if (r.recipe_id !== curRid) { flush(); curRid = r.recipe_id; curIns = []; }
+      curIns.push(r.element_id);
+    }
+    flush();
+  } catch {
+    return ratios; // library not imported yet
+  }
+  const out = {};
+  for (const [pidKey, info] of Object.entries(ratios)) {
+    const ingredients = info.food_elements && info.food_elements.length
+      ? info.food_elements
+      : Object.keys(info.ratios || {}).map(Number);
+    const key = ingredients.slice().sort((a, b) => a - b).join(",");
+    const candidates = recipesByKey.get(key) || [];
+    const resolved = candidates.length === 1 ? candidates[0] : null;
+    const entry = { ...info, recipe_id: resolved, candidate_recipe_ids: candidates };
+    // Key the top-level map by recipe_id when uniquely resolved; otherwise
+    // keep the pid. This makes the frontend's recipeRatios[r.id] lookup hit
+    // for the common case (Kitchen Processed Food etc).
+    out[resolved != null ? String(resolved) : pidKey] = entry;
+  }
+  return out;
+}
+
 db.prepare = function wrappedPrepare(sql) {
   const stmt = _rawPrepare(sql);
   if (sql === INSERT_BODY_SQL) {
@@ -255,11 +316,19 @@ db.prepare = function wrappedPrepare(sql) {
             _updateSnapshotJumps.run(payload.jump_edges_json, snapshotId);
           }
           if (payload && (payload.recipe_ratios_json || payload.corpses != null)) {
-            _updateSnapshotRecipes.run(
-              payload.recipe_ratios_json || null,
-              payload.corpses || 0,
-              snapshotId
-            );
+            // Re-key by resolved recipe_id where possible (see
+            // resolveRecipeRatios above). Falls back to the pid-keyed shape if
+            // the library isn't imported yet or no recipes match.
+            let json = payload.recipe_ratios_json || null;
+            if (json) {
+              try {
+                const resolved = resolveRecipeRatios(JSON.parse(json));
+                json = JSON.stringify(resolved);
+              } catch {
+                // Bad JSON? Keep original.
+              }
+            }
+            _updateSnapshotRecipes.run(json, payload.corpses || 0, snapshotId);
           }
           if (payload && Array.isArray(payload.grow_beds)) {
             for (const gb of payload.grow_beds) {

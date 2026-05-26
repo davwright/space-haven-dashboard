@@ -642,6 +642,25 @@ main { height: calc(100% - 44px); }
 }
 .rc-ratio-seg { height: 100%; opacity: 0.85; }
 
+/* Recipe output nutrient profile — small icon pills under the I/O line. */
+.rc-nut { margin-top: 0.25rem; display: flex; flex-direction: column; gap: 0.2rem; }
+.rc-nut-row { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; }
+.rc-nut-label { color: var(--muted); flex: 0 0 auto; }
+.rc-nut-icons { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+.rc-nut-pill {
+  display: inline-flex; align-items: center; gap: 0.15rem;
+  padding: 0 0.3rem; border-radius: 8px;
+  background: var(--bg-2); font-size: 0.78rem;
+  border: 1px solid var(--border);
+}
+.rc-nut-pill .nut-icon { width: 12px; height: 12px; }
+.rc-nut-pill.protein  { color: var(--protein); }
+.rc-nut-pill.carbs    { color: var(--carbs); }
+.rc-nut-pill.fat      { color: var(--fat); }
+.rc-nut-pill.vitamins { color: var(--vitamins); }
+.rc-nut-pill.toxins   { color: var(--toxins); }
+.rc-nut-pill > span:last-child { color: var(--text); }
+
 .storage-page {
   flex: 1; overflow: auto;
   padding: 0.6rem 1rem;
@@ -1041,4 +1060,94 @@ main { height: calc(100% - 44px); }
   overflow: auto;
   flex: 1;
   padding: 0 0.5rem 0.5rem;
+}
+
+/* crew-skills widget — reuses .crew-table.skills-table and the legacy toolbar. */
+.sh-widget.widget-crew-skills .cs-toolbar {
+  justify-content: space-between;
+}
+
+/* storage-all widget — categories in an auto-fill grid; each category is a
+   draggable, collapsible card. */
+.sh-widget.widget-storage-all {
+  display: flex; flex-direction: column;
+}
+.sh-widget .sa-toolbar {
+  padding: 0.4rem 0.75rem;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+.sh-widget .sa-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.6rem;
+  padding: 0.6rem;
+  flex: 1;
+  align-content: start;
+  overflow: auto;
+}
+.sh-widget .sa-grid .storage-category {
+  margin: 0;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.4rem 0.5rem;
+  cursor: grab;
+}
+.sh-widget .sa-grid .storage-category.sa-dragging {
+  opacity: 0.4;
+  cursor: grabbing;
+}
+.sh-widget .sa-grid .storage-category.sa-drop-target {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+.sh-widget .sa-grid .storage-category-head {
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid var(--border);
+}
+.sh-widget .sa-grid .storage-category-head .sa-caret {
+  display: inline-block;
+  width: 1ch;
+  margin-right: 0.3rem;
+  color: var(--accent-dim);
+}
+.sh-widget .sa-grid .storage-category-head .sa-cat-name {
+  flex: 1;
+}
+.sh-widget .sa-grid .storage-category.collapsed .storage-category-items {
+  display: none;
+}
+.sh-widget .sa-grid .storage-category.collapsed .storage-category-head {
+  border-bottom-color: transparent;
+}
+
+/* map-galaxy widget — placeholder card centred in the panel. */
+.sh-widget.widget-map-galaxy {
+  display: flex; align-items: center; justify-content: center;
+}
+.sh-widget .mg-placeholder {
+  max-width: 32rem;
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--text-dim);
+}
+.sh-widget .mg-placeholder .mg-icon { font-size: 2.5rem; }
+.sh-widget .mg-placeholder .mg-title {
+  font-size: 1.1rem; color: var(--text); margin: 0.3rem 0 0.6rem;
+}
+.sh-widget .mg-placeholder .mg-msg { line-height: 1.4; margin-bottom: 1rem; }
+.sh-widget .mg-placeholder .mg-open {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  color: var(--accent);
+  padding: 0.4rem 0.9rem;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.sh-widget .mg-placeholder .mg-open:hover {
+  border-color: var(--accent);
 }

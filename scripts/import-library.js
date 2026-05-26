@@ -218,6 +218,12 @@ function parseHaven(xmlBuf) {
     // the group. Verified against day-56 save 2026-05-26.
     const sortS = p.sort?.["@_s"] != null ? Number(p.sort["@_s"]) : null;
     const sortP = p.sort?.["@_p"] != null ? Number(p.sort["@_p"]) : null;
+    // <edible foodUsageType="Food" protein="6.0" carbs="9.0" fat="4.0"
+    //   vitamins="3.0" toxins="0.0" rank="10.0"/> on food items gives the
+    // nutrient profile per unit. Same shape on <customFood> inside Process
+    // recipes (captured separately below). Only food/beverage products have
+    // <edible>; everything else gets null for these columns.
+    const ed = p.edible;
     elements.push({
       id: Number(p["@_eid"]),
       name_tid: Number(nameTid),
@@ -225,6 +231,11 @@ function parseHaven(xmlBuf) {
       type: p["@_type"] != null ? String(p["@_type"]) : null,
       sort_group: sortS,
       sort_pos: sortP,
+      protein: ed?.["@_protein"] != null ? Number(ed["@_protein"]) : null,
+      carbs: ed?.["@_carbs"] != null ? Number(ed["@_carbs"]) : null,
+      fat: ed?.["@_fat"] != null ? Number(ed["@_fat"]) : null,
+      vitamins: ed?.["@_vitamins"] != null ? Number(ed["@_vitamins"]) : null,
+      toxins: ed?.["@_toxins"] != null ? Number(ed["@_toxins"]) : null,
     });
   }
 
@@ -305,10 +316,20 @@ function parseHaven(xmlBuf) {
       facility = p.difficulty["@_skill"];
     }
     const nameTid = p.name?.["@_tid"] != null ? Number(p.name["@_tid"]) : null;
+    // <customFood protein= carbs= fat= vitamins= toxins=/> inside
+    // <foodProcessing><dispenser> on Kitchen/Bar recipes gives the nutrient
+    // profile of the FOOD this recipe produces (not necessarily the same as
+    // the output element's own <edible> — recipes can tweak the profile).
+    const cf = p.foodProcessing?.dispenser?.customFood;
     recipes.push({
       id,
       name_tid: nameTid,
       facility_type: facility,
+      out_protein: cf?.["@_protein"] != null ? Number(cf["@_protein"]) : null,
+      out_carbs: cf?.["@_carbs"] != null ? Number(cf["@_carbs"]) : null,
+      out_fat: cf?.["@_fat"] != null ? Number(cf["@_fat"]) : null,
+      out_vitamins: cf?.["@_vitamins"] != null ? Number(cf["@_vitamins"]) : null,
+      out_toxins: cf?.["@_toxins"] != null ? Number(cf["@_toxins"]) : null,
     });
     for (const n of needs) {
       const el = n["@_element"];
@@ -414,7 +435,8 @@ function ensureSchema() {
     CREATE TABLE IF NOT EXISTS element_defs (
       id INTEGER PRIMARY KEY,
       name_tid INTEGER, desc_tid INTEGER,
-      type TEXT
+      type TEXT,
+      protein REAL, carbs REAL, fat REAL, vitamins REAL, toxins REAL
     );
     CREATE TABLE IF NOT EXISTS attribute_defs (
       id INTEGER PRIMARY KEY,
@@ -447,7 +469,8 @@ function ensureSchema() {
       id INTEGER PRIMARY KEY,
       name_tid INTEGER,
       name TEXT,
-      facility_type TEXT
+      facility_type TEXT,
+      out_protein REAL, out_carbs REAL, out_fat REAL, out_vitamins REAL, out_toxins REAL
     );
     CREATE TABLE IF NOT EXISTS recipe_inputs (
       recipe_id INTEGER NOT NULL,
@@ -468,6 +491,18 @@ function ensureSchema() {
   // Older databases may have a leaner element_defs schema; extend if needed.
   ensureColumn("element_defs", "sort_group", "INTEGER");
   ensureColumn("element_defs", "sort_pos", "INTEGER");
+  // Nutrient profile (per unit) for food/beverage products. NULL for non-food.
+  ensureColumn("element_defs", "protein", "REAL");
+  ensureColumn("element_defs", "carbs", "REAL");
+  ensureColumn("element_defs", "fat", "REAL");
+  ensureColumn("element_defs", "vitamins", "REAL");
+  ensureColumn("element_defs", "toxins", "REAL");
+  // Recipe output nutrient profile (from <customFood> on the Process product).
+  ensureColumn("recipe_defs", "out_protein", "REAL");
+  ensureColumn("recipe_defs", "out_carbs", "REAL");
+  ensureColumn("recipe_defs", "out_fat", "REAL");
+  ensureColumn("recipe_defs", "out_vitamins", "REAL");
+  ensureColumn("recipe_defs", "out_toxins", "REAL");
 }
 
 function ensureColumn(table, column, ddl) {
@@ -511,13 +546,17 @@ function importLibrary(jarPath) {
     "INSERT INTO condition_defs (id, name_tid, desc_tid, color, meta, stackable, only_one, display_on_screen, add_to_log) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
   );
   const insertTrait = db.prepare("INSERT INTO trait_defs (id, name_tid, desc_tid) VALUES (?, ?, ?)");
-  const insertElement = db.prepare("INSERT INTO element_defs (id, name_tid, desc_tid, type, sort_group, sort_pos) VALUES (?, ?, ?, ?, ?, ?)");
+  const insertElement = db.prepare(
+    "INSERT INTO element_defs (id, name_tid, desc_tid, type, sort_group, sort_pos, protein, carbs, fat, vitamins, toxins) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  );
   const insertAttr = db.prepare("INSERT INTO attribute_defs (id, name_tid, desc_tid) VALUES (?, ?, ?)");
   const insertFaction = db.prepare("INSERT INTO faction_defs (id, name_tid, side) VALUES (?, ?, ?)");
   const insertMainCat = db.prepare("INSERT INTO main_cat_defs (id, name_tid, name, sort_order) VALUES (?, ?, ?, ?)");
   const insertSubCat = db.prepare("INSERT INTO sub_cat_defs (id, parent_id, name_tid, name, sort_order) VALUES (?, ?, ?, ?, ?)");
   const insertBuildElement = db.prepare("INSERT OR REPLACE INTO build_element_defs (mid, sub_cat_id, name_tid, name) VALUES (?, ?, ?, ?)");
-  const insertRecipe = db.prepare("INSERT INTO recipe_defs (id, name_tid, name, facility_type) VALUES (?, ?, ?, ?)");
+  const insertRecipe = db.prepare(
+    "INSERT INTO recipe_defs (id, name_tid, name, facility_type, out_protein, out_carbs, out_fat, out_vitamins, out_toxins) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  );
   const insertRecipeIn = db.prepare("INSERT OR REPLACE INTO recipe_inputs (recipe_id, element_id, count, consume_every) VALUES (?, ?, ?, ?)");
   const insertRecipeOut = db.prepare("INSERT OR REPLACE INTO recipe_outputs (recipe_id, element_id, count, produce_every) VALUES (?, ?, ?, ?)");
   const upsertVersion = db.prepare(
@@ -538,13 +577,19 @@ function importLibrary(jarPath) {
       insertCondition.run(c.id, c.name_tid, c.desc_tid, c.color, c.meta, c.stackable, c.only_one, c.display_on_screen, c.add_to_log);
     }
     for (const t of haven.traits) insertTrait.run(t.id, t.name_tid, t.desc_tid);
-    for (const e of haven.elements) insertElement.run(e.id, e.name_tid, e.desc_tid, e.type, e.sort_group, e.sort_pos);
+    for (const e of haven.elements) insertElement.run(
+      e.id, e.name_tid, e.desc_tid, e.type, e.sort_group, e.sort_pos,
+      e.protein, e.carbs, e.fat, e.vitamins, e.toxins
+    );
     for (const a of haven.attributes) insertAttr.run(a.id, a.name_tid, a.desc_tid);
     for (const f of haven.factions) insertFaction.run(f.id, f.name_tid, f.side);
     for (const mc of haven.mainCats) insertMainCat.run(mc.id, mc.name_tid, nameOf(mc.name_tid), mc.order);
     for (const sc of haven.subCats) insertSubCat.run(sc.id, sc.parent_id, sc.name_tid, nameOf(sc.name_tid), sc.order);
     for (const be of haven.buildElements) insertBuildElement.run(be.mid, be.sub_cat_id, be.name_tid, nameOf(be.name_tid));
-    for (const r of haven.recipes) insertRecipe.run(r.id, r.name_tid, nameOf(r.name_tid), r.facility_type);
+    for (const r of haven.recipes) insertRecipe.run(
+      r.id, r.name_tid, nameOf(r.name_tid), r.facility_type,
+      r.out_protein, r.out_carbs, r.out_fat, r.out_vitamins, r.out_toxins
+    );
     for (const ri of haven.recipeInputs) insertRecipeIn.run(ri.recipe_id, ri.element_id, ri.count, ri.consume_every);
     for (const ro of haven.recipeOutputs) insertRecipeOut.run(ro.recipe_id, ro.element_id, ro.count, ro.produce_every);
     upsertVersion.run(haven.libVersion, Math.floor(jarStat.mtimeMs), Date.now());

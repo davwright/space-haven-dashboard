@@ -277,7 +277,8 @@ function listRecipes() {
   try {
     recipes = db
       .prepare(
-        `SELECT r.id, r.name, r.facility_type
+        `SELECT r.id, r.name, r.facility_type,
+                r.out_protein, r.out_carbs, r.out_fat, r.out_vitamins, r.out_toxins
            FROM recipe_defs r`
       )
       .all();
@@ -297,13 +298,24 @@ function listRecipes() {
   const outputs = db
     .prepare(
       `SELECT ro.recipe_id, ro.element_id, ro.count, ro.produce_every,
-              t.en AS name, e.type AS element_type
+              t.en AS name, e.type AS element_type,
+              e.protein, e.carbs, e.fat, e.vitamins, e.toxins
          FROM recipe_outputs ro
          LEFT JOIN element_defs e ON e.id = ro.element_id
          LEFT JOIN text_defs t ON t.tid = e.name_tid`
     )
     .all();
-  const byId = new Map(recipes.map((r) => [r.id, { ...r, inputs: [], outputs: [] }]));
+  const byId = new Map(recipes.map((r) => [r.id, {
+    ...r,
+    nutrition: (r.out_protein != null || r.out_carbs != null || r.out_fat != null || r.out_vitamins != null || r.out_toxins != null)
+      ? {
+          protein: r.out_protein, carbs: r.out_carbs, fat: r.out_fat,
+          vitamins: r.out_vitamins, toxins: r.out_toxins,
+        }
+      : null,
+    inputs: [],
+    outputs: [],
+  }]));
   for (const i of inputs) {
     const r = byId.get(i.recipe_id);
     if (!r) continue;
@@ -318,12 +330,16 @@ function listRecipes() {
   for (const o of outputs) {
     const r = byId.get(o.recipe_id);
     if (!r) continue;
+    const hasNut = o.protein != null || o.carbs != null || o.fat != null || o.vitamins != null || o.toxins != null;
     r.outputs.push({
       element_id: o.element_id,
       name: o.name || `Item #${o.element_id}`,
       type: o.element_type,
       count: o.count,
       produce_every: o.produce_every,
+      nutrition: hasNut
+        ? { protein: o.protein, carbs: o.carbs, fat: o.fat, vitamins: o.vitamins, toxins: o.toxins }
+        : null,
     });
   }
   const all = [...byId.values()];

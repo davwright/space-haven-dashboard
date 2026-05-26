@@ -59,7 +59,7 @@ const parser = new XMLParser({
   // Force these to arrays so we don't have to branch on "single vs list".
   isArray: (name, jpath) => {
     // Containers that are nearly always a list:
-    if (["l", "e", "c", "s", "t", "a", "f", "j", "m"].includes(name)) return true;
+    if (["l", "e", "c", "s", "t", "a", "f", "j", "m", "n"].includes(name)) return true;
     if (name === "ship") return true;
     return false;
   },
@@ -624,12 +624,23 @@ function extractRecipeRatios(gameDoc) {
         ratios[String(el)] = v;
       }
       if (Object.keys(ratios).length === 0) continue;
+      // <food><n id="X"/> lists the canonical ingredient element ids the
+      // engine knows this recipe uses (the player's <cinv> reflects current
+      // weights, which may be a subset when sliders are at zero). We surface
+      // both so the library-side resolver can match prod → recipe by
+      // ingredient set even when one ingredient is currently disabled.
+      const foodNs = p.food?.n;
+      const nArr = Array.isArray(foodNs) ? foodNs : foodNs ? [foodNs] : [];
+      const foodElements = nArr
+        .map((n) => (n && n["@_id"] != null ? Number(n["@_id"]) : null))
+        .filter((x) => x != null);
       const key = String(pid);
       out[key] = {
         pid: Number(pid),
         fpid: fpid != null ? Number(fpid) : null,
         facility_mid: facilityMid,
         ratios,
+        food_elements: foodElements,
       };
     }
   });
