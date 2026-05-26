@@ -17,7 +17,7 @@ function listDays() {
 function nearestSnapshotForDay(day) {
   return db
     .prepare(
-      "SELECT snapshot_id, game_day, real_timestamp, save_path, player_ship_x, player_ship_y, player_system_id, jump_edges_json, recipe_ratios_json, corpses FROM snapshots WHERE game_day <= ? ORDER BY game_day DESC, snapshot_id DESC LIMIT 1"
+      "SELECT snapshot_id, game_day, real_timestamp, save_path, player_ship_x, player_ship_y, player_system_id, jump_edges_json, recipe_ratios_json, corpses, researched_tech_json, research_progress_json FROM snapshots WHERE game_day <= ? ORDER BY game_day DESC, snapshot_id DESC LIMIT 1"
     )
     .get(day);
 }
@@ -31,6 +31,8 @@ function snapshotForDay(day) {
   full.playerSystemId = snap.player_system_id;
   full.jumpEdges = snap.jump_edges_json ? safeJson(snap.jump_edges_json) || [] : [];
   full.recipeRatios = snap.recipe_ratios_json ? safeJson(snap.recipe_ratios_json) || {} : {};
+  full.researchedTech = snap.researched_tech_json ? safeJson(snap.researched_tech_json) || [] : [];
+  full.researchProgress = snap.research_progress_json ? safeJson(snap.research_progress_json) || {} : {};
   full.fertility = buildFertility(full.storage, snap.corpses || 0);
   return full;
 }
@@ -361,6 +363,49 @@ function listRecipes() {
   });
 }
 
+// Tech defs + tree adjacency, joined with text_defs for readable names. Each
+// tech carries `prerequisites` (incoming links: who must be researched first)
+// and `unlocks` (outgoing links: what this tech enables next). Unlocks here
+// are the *tree-graph* unlocks (downstream techs); the haven library's
+// per-tech <unlocks> list (buildings/augmentations/etc) is separately
+// captured as `gameUnlocks` so the capability layer can match them.
+function listTechs() {
+  let techs;
+  try {
+    techs = db
+      .prepare(
+        `SELECT id, name, category, cost, stage_count, hidden, unlocks_json
+           FROM tech_defs`
+      )
+      .all();
+  } catch {
+    return [];
+  }
+  if (techs.length === 0) return [];
+  const links = db
+    .prepare("SELECT from_tech_id, to_tech_id FROM tech_tree_links")
+    .all();
+  const prereqs = new Map(); // tech -> [from ids]
+  const downstream = new Map(); // tech -> [to ids]
+  for (const l of links) {
+    if (!prereqs.has(l.to_tech_id)) prereqs.set(l.to_tech_id, []);
+    prereqs.get(l.to_tech_id).push(l.from_tech_id);
+    if (!downstream.has(l.from_tech_id)) downstream.set(l.from_tech_id, []);
+    downstream.get(l.from_tech_id).push(l.to_tech_id);
+  }
+  return techs.map((t) => ({
+    id: t.id,
+    name: t.name || `Tech #${t.id}`,
+    category: t.category,
+    cost: t.cost,
+    stage_count: t.stage_count,
+    hidden: !!t.hidden,
+    prerequisites: prereqs.get(t.id) || [],
+    unlocks: downstream.get(t.id) || [],
+    gameUnlocks: t.unlocks_json ? safeJson(t.unlocks_json) || [] : [],
+  }));
+}
+
 function safeJson(s) {
   try {
     return JSON.parse(s);
@@ -383,4 +428,5 @@ module.exports = {
   timelineTicks,
   playerShipPath,
   listRecipes,
+  listTechs,
 };

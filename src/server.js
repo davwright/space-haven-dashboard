@@ -103,6 +103,10 @@ const server = http.createServer((req, res) => {
     return jsonRes(res, 200, history.listRecipes());
   }
 
+  if (pathname === "/library/techs") {
+    return jsonRes(res, 200, history.listTechs());
+  }
+
   if (pathname === "/library/icons") {
     // Map of element_id -> { aid, w, h, atlas }. Frontend builds <img
     // src="/icons/<id>.png"> from the keys; the metadata helps sizing/CSS.

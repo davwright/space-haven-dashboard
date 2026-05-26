@@ -59,6 +59,9 @@ function stmts() {
       factionById: db.prepare(
         "SELECT f.id, f.side, t.en AS name FROM faction_defs f LEFT JOIN text_defs t ON t.tid = f.name_tid WHERE f.id = ?"
       ),
+      techById: db.prepare(
+        "SELECT td.id, td.category, td.cost, t.en AS name FROM tech_defs td LEFT JOIN text_defs t ON t.tid = td.name_tid WHERE td.id = ?"
+      ),
     };
     return _stmts;
   } catch {
@@ -133,6 +136,12 @@ function factionInfo(id) {
   const r = safeGet("factionById", id);
   if (!r || !r.name) return { id, name: `Faction #${id}` };
   return { id, name: r.name, side: r.side };
+}
+
+function techInfo(id) {
+  const r = safeGet("techById", id);
+  if (!r || !r.name) return { id, name: `Tech #${id}` };
+  return { id, name: r.name, category: r.category };
 }
 
 // Skill `sk=N` values in saves don't have a numbered definition in haven; the
@@ -249,6 +258,7 @@ module.exports = {
   attributeInfo,
   factionInfo,
   skillInfo,
+  techInfo,
   conditionName,
   attributeName,
   skillName,

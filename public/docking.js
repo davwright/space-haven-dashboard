@@ -139,9 +139,15 @@
     }
     if (!window.Dockview || typeof window.Dockview.createDockview !== "function") {
       console.error("bootDocking: dockview-core not loaded (window.Dockview missing)");
-      host.innerHTML = `<div class="widget-error">Dockview failed to load. Check the browser console.</div>`;
+      host.innerHTML = `<div class="widget-error" style="padding:20px;color:#c0392b">Dockview failed to load. Check the browser console (F12). Likely cause: the CDN ESM bundle didn't import, or a network/CSP block.</div>`;
       return;
     }
+
+    // Mark host visible so a CSS issue doesn't leave a 0×0 black box.
+    host.style.minHeight = "400px";
+    host.style.position = "relative";
+
+    try {
 
     api = window.Dockview.createDockview(host, {
       className: "dockview-theme-dark sh-dockview",
@@ -198,6 +204,17 @@
       } else if (active.tree) {
         installTreeAsPanels(active);
       }
+    }
+    } catch (err) {
+      console.error("[bootDocking] crashed:", err);
+      host.innerHTML = `<div class="widget-error" style="padding:20px;color:#c0392b">
+        <strong>Workspace failed to render.</strong><br><br>
+        <code style="display:block;background:#1c232c;padding:8px;border-radius:4px;white-space:pre-wrap;font-size:12px">${
+          (err && (err.stack || err.message || String(err))).replace(/[<>&]/g, (c) => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))
+        }</code>
+        <br>Tip: open the browser console (F12) for the full error. To reset workspace state, run
+        <code>localStorage.removeItem('sh.workspaces')</code> and reload.
+      </div>`;
     }
   }
 

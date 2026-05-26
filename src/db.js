@@ -171,6 +171,12 @@ ensureColumn("snapshots", "recipe_ratios_json", "TEXT");
 // by the Fertility supply panel (corpses are composter input).
 ensureColumn("snapshots", "corpses", "INTEGER DEFAULT 0");
 
+// JSON array of completed tech ids (research fully unlocked) plus a JSON
+// object of in-progress fractional progress per tech. Used by the capability
+// gating layer's `{ type: "research", tech: "X" }` predicate.
+ensureColumn("snapshots", "researched_tech_json", "TEXT");
+ensureColumn("snapshots", "research_progress_json", "TEXT");
+
 // ----- Insert interception ------------------------------------------------
 //
 // ingest.js is intentionally not edited here (parallel agent rules), but we
@@ -199,6 +205,9 @@ const _updateSnapshotJumps = _rawPrepare(
 );
 const _updateSnapshotRecipes = _rawPrepare(
   "UPDATE snapshots SET recipe_ratios_json = ?, corpses = ? WHERE snapshot_id = ?"
+);
+const _updateSnapshotResearch = _rawPrepare(
+  "UPDATE snapshots SET researched_tech_json = ?, research_progress_json = ? WHERE snapshot_id = ?"
 );
 const _insertGrowBed = _rawPrepare(
   "INSERT OR REPLACE INTO grow_bed_observations (snapshot_id, plant_id, plant_name, growth, stage, bed_x, bed_y, ship_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
@@ -329,6 +338,13 @@ db.prepare = function wrappedPrepare(sql) {
               }
             }
             _updateSnapshotRecipes.run(json, payload.corpses || 0, snapshotId);
+          }
+          if (payload && (payload.researched_tech_json || payload.research_progress_json)) {
+            _updateSnapshotResearch.run(
+              payload.researched_tech_json || null,
+              payload.research_progress_json || null,
+              snapshotId
+            );
           }
           if (payload && Array.isArray(payload.grow_beds)) {
             for (const gb of payload.grow_beds) {

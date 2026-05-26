@@ -144,6 +144,12 @@ const parser = new XMLParser({
     if (jpath === "data.MainCat.cat") return true;
     if (jpath === "data.SubCat.cat") return true;
     if (jpath === "data.Element.me") return true;
+    if (jpath === "data.Tech.tech") return true;
+    if (jpath === "data.Tech.tech.stages.l") return true;
+    if (jpath === "data.Tech.tech.unlocks.l") return true;
+    if (jpath === "data.TechTree.tree") return true;
+    if (jpath === "data.TechTree.tree.items.i") return true;
+    if (jpath === "data.TechTree.tree.links.l") return true;
     return false;
   },
 });
@@ -389,6 +395,65 @@ function parseHaven(xmlBuf) {
     });
   }
 
+  // Tech and TechTree blocks. Each <tech id=…> declares a research entry; the
+  // total `cost` we surface is level1+level2+level3 lab points summed across
+  // every <stage> (multi-stage techs add their costs together). Category is
+  // derived from `tidC` — haven's TechTree carries category labels in <labels>
+  // but every tech only has the numeric tidC. We map the small set we see
+  // (0/1/2) to human strings via the text_defs at write-time below; for now
+  // we just keep tidC as the raw category id.
+  const techs = [];
+  for (const t of data.Tech?.tech || []) {
+    if (t["@_id"] == null) continue;
+    const stages = t.stages?.l || [];
+    let totalCost = 0;
+    for (const stg of stages) {
+      const lp = stg.labPoints;
+      if (!lp) continue;
+      totalCost +=
+        (lp["@_level1"] != null ? Number(lp["@_level1"]) : 0) +
+        (lp["@_level2"] != null ? Number(lp["@_level2"]) : 0) +
+        (lp["@_level3"] != null ? Number(lp["@_level3"]) : 0);
+    }
+    const unlocksRaw = t.unlocks?.l || [];
+    const unlocks = unlocksRaw
+      .map((u) => {
+        const type = u["@_type"] != null ? String(u["@_type"]) : null;
+        if (!type) return null;
+        // Pick the first non-type attribute as the unlock id (buildingId,
+        // augmentationId, dataId, …). Keeps the captured shape generic.
+        let targetId = null;
+        for (const k of Object.keys(u)) {
+          if (k === "@_type" || !k.startsWith("@_")) continue;
+          if (targetId == null) targetId = Number(u[k]);
+        }
+        return { type, targetId };
+      })
+      .filter(Boolean);
+    techs.push({
+      id: Number(t["@_id"]),
+      name_tid: t.name?.["@_tid"] != null ? Number(t.name["@_tid"]) : null,
+      desc_tid: t.desc?.["@_tid"] != null ? Number(t.desc["@_tid"]) : null,
+      tid_c: t["@_tidC"] != null ? Number(t["@_tidC"]) : null,
+      hidden: t["@_hidden"] === true || t["@_hidden"] === "true" ? 1 : 0,
+      cost: totalCost,
+      stage_count: stages.length,
+      unlocks_json: unlocks.length ? JSON.stringify(unlocks) : null,
+    });
+  }
+
+  const techLinks = [];
+  for (const tree of data.TechTree?.tree || []) {
+    const treeId = tree["@_id"] != null ? Number(tree["@_id"]) : null;
+    const links = tree.links?.l || [];
+    for (const l of links) {
+      const fromId = l["@_fromId"] != null ? Number(l["@_fromId"]) : null;
+      const toId = l["@_toId"] != null ? Number(l["@_toId"]) : null;
+      if (fromId == null || toId == null) continue;
+      techLinks.push({ from: fromId, to: toId, tree: treeId });
+    }
+  }
+
   return {
     libVersion,
     conditions,
@@ -402,6 +467,8 @@ function parseHaven(xmlBuf) {
     recipes,
     recipeInputs,
     recipeOutputs,
+    techs,
+    techLinks,
   };
 }
 
@@ -486,6 +553,24 @@ function ensureSchema() {
       produce_every REAL,
       PRIMARY KEY (recipe_id, element_id)
     );
+    CREATE TABLE IF NOT EXISTS tech_defs (
+      id INTEGER PRIMARY KEY,
+      name_tid INTEGER,
+      desc_tid INTEGER,
+      category TEXT,
+      cost INTEGER,
+      stage_count INTEGER,
+      hidden INTEGER,
+      tid_c INTEGER,
+      unlocks_json TEXT,
+      name TEXT
+    );
+    CREATE TABLE IF NOT EXISTS tech_tree_links (
+      from_tech_id INTEGER,
+      to_tech_id INTEGER,
+      tree_id INTEGER,
+      PRIMARY KEY (from_tech_id, to_tech_id, tree_id)
+    );
   `);
 
   // Older databases may have a leaner element_defs schema; extend if needed.
@@ -530,7 +615,7 @@ function importLibrary(jarPath) {
   console.log("[import-library] parsing haven XML...");
   const t2 = Date.now();
   const haven = parseHaven(entries["library/haven"]);
-  console.log(`[import-library] parsed haven (${Date.now() - t2}ms): libVersion=${haven.libVersion}, ${haven.conditions.length} conditions, ${haven.traits.length} traits, ${haven.elements.length} elements, ${haven.attributes.length} attributes, ${haven.factions.length} factions, ${haven.mainCats.length} mainCats, ${haven.subCats.length} subCats, ${haven.buildElements.length} buildElements, ${haven.recipes.length} recipes (${haven.recipeInputs.length} inputs, ${haven.recipeOutputs.length} outputs)`);
+  console.log(`[import-library] parsed haven (${Date.now() - t2}ms): libVersion=${haven.libVersion}, ${haven.conditions.length} conditions, ${haven.traits.length} traits, ${haven.elements.length} elements, ${haven.attributes.length} attributes, ${haven.factions.length} factions, ${haven.mainCats.length} mainCats, ${haven.subCats.length} subCats, ${haven.buildElements.length} buildElements, ${haven.recipes.length} recipes (${haven.recipeInputs.length} inputs, ${haven.recipeOutputs.length} outputs), ${haven.techs.length} techs (${haven.techLinks.length} tree links)`);
 
   // Resolve tids → EN names so the new denormalized .name columns can be
   // populated in a single pass (avoid a JOIN on every read).
@@ -559,6 +644,12 @@ function importLibrary(jarPath) {
   );
   const insertRecipeIn = db.prepare("INSERT OR REPLACE INTO recipe_inputs (recipe_id, element_id, count, consume_every) VALUES (?, ?, ?, ?)");
   const insertRecipeOut = db.prepare("INSERT OR REPLACE INTO recipe_outputs (recipe_id, element_id, count, produce_every) VALUES (?, ?, ?, ?)");
+  const insertTech = db.prepare(
+    "INSERT INTO tech_defs (id, name_tid, desc_tid, category, cost, stage_count, hidden, tid_c, unlocks_json, name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  );
+  const insertTechLink = db.prepare(
+    "INSERT OR REPLACE INTO tech_tree_links (from_tech_id, to_tech_id, tree_id) VALUES (?, ?, ?)"
+  );
   const upsertVersion = db.prepare(
     "INSERT OR REPLACE INTO library_version (id, lib_version, jar_mtime, imported_at) VALUES (1, ?, ?, ?)"
   );
@@ -568,7 +659,8 @@ function importLibrary(jarPath) {
       "DELETE FROM text_defs; DELETE FROM condition_defs; DELETE FROM trait_defs;" +
         " DELETE FROM element_defs; DELETE FROM attribute_defs; DELETE FROM faction_defs;" +
         " DELETE FROM main_cat_defs; DELETE FROM sub_cat_defs; DELETE FROM build_element_defs;" +
-        " DELETE FROM recipe_defs; DELETE FROM recipe_inputs; DELETE FROM recipe_outputs;"
+        " DELETE FROM recipe_defs; DELETE FROM recipe_inputs; DELETE FROM recipe_outputs;" +
+        " DELETE FROM tech_defs; DELETE FROM tech_tree_links;"
     );
     for (const t of texts) {
       insertTexts.run(t.tid, t.pid, t.en, t.de, t.fr, t.es, t.it, t.pl, t.cn, t.cs, t.ja, t.ko, t.ptbr, t.ru, t.tr);
@@ -592,6 +684,17 @@ function importLibrary(jarPath) {
     );
     for (const ri of haven.recipeInputs) insertRecipeIn.run(ri.recipe_id, ri.element_id, ri.count, ri.consume_every);
     for (const ro of haven.recipeOutputs) insertRecipeOut.run(ro.recipe_id, ro.element_id, ro.count, ro.produce_every);
+    for (const t of haven.techs) {
+      // `category` is the English name resolved from tidC (haven uses three
+      // category buckets today: 0/1/2). When tidC has no matching text entry
+      // we leave it null and the frontend falls back to "Uncategorized".
+      const categoryName = nameOf(t.tid_c);
+      insertTech.run(
+        t.id, t.name_tid, t.desc_tid, categoryName, t.cost, t.stage_count,
+        t.hidden, t.tid_c, t.unlocks_json, nameOf(t.name_tid)
+      );
+    }
+    for (const tl of haven.techLinks) insertTechLink.run(tl.from, tl.to, tl.tree);
     upsertVersion.run(haven.libVersion, Math.floor(jarStat.mtimeMs), Date.now());
   });
 
@@ -599,7 +702,7 @@ function importLibrary(jarPath) {
 
   const dateStr = new Date(jarStat.mtimeMs).toISOString().slice(0, 10);
   console.log(
-    `[import-library] Imported ${texts.length} text entries, ${haven.conditions.length} conditions, ${haven.traits.length} traits, ${haven.elements.length} elements, ${haven.attributes.length} attributes, ${haven.factions.length} factions, ${haven.mainCats.length} mainCats, ${haven.subCats.length} subCats, ${haven.buildElements.length} buildElements, ${haven.recipes.length} recipes from libVersion ${haven.libVersion} (jar from ${dateStr}).`
+    `[import-library] Imported ${texts.length} text entries, ${haven.conditions.length} conditions, ${haven.traits.length} traits, ${haven.elements.length} elements, ${haven.attributes.length} attributes, ${haven.factions.length} factions, ${haven.mainCats.length} mainCats, ${haven.subCats.length} subCats, ${haven.buildElements.length} buildElements, ${haven.recipes.length} recipes, ${haven.techs.length} techs (${haven.techLinks.length} tree links) from libVersion ${haven.libVersion} (jar from ${dateStr}).`
   );
 
   return {
@@ -616,6 +719,8 @@ function importLibrary(jarPath) {
       subCats: haven.subCats.length,
       buildElements: haven.buildElements.length,
       recipes: haven.recipes.length,
+      techs: haven.techs.length,
+      techLinks: haven.techLinks.length,
     },
   };
 }

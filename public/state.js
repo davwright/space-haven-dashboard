@@ -256,7 +256,11 @@
       for (const entry of entries) list.push({ path, entry });
     }
     fireBindings(list, oldByPath);
-    fireTreeReplaced();
+    // Note: we intentionally do NOT call fireTreeReplaced here. Incremental
+    // patches are handled surgically via bindings; firing tree-replaced would
+    // trigger full widget re-renders and discard the very bindings the
+    // patches just touched. Tree-replaced subscribers exist for structural
+    // changes only (replaceTree).
   }
 
   // -------------------------------------------------------------------------

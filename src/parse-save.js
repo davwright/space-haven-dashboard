@@ -699,6 +699,61 @@ function extractJumpEdges(gameDoc) {
   return edges;
 }
 
+// ----- Research progress (completed tech ids + per-tech fractional progress) -----
+//
+// Save shape (verified against day-67 New haven-2 save, libVersion 1.0.1_steam_2):
+//
+//   <research treeId="2535">
+//     <states>
+//       <l techId="3124" paused="false" activeStageIndex="2">    <- 2 of 2 stages done
+//         <stageStates>
+//           <l stage="1" done="true">  <blocksDone level1=.. level2=.. level3=../>
+//             <benchTaskStates>...</benchTaskStates>
+//           </l>
+//           <l stage="2" done="true">  <blocksDone .../></l>
+//         </stageStates>
+//       </l>
+//       <l techId="2532" paused="false" activeStageIndex="0">    <- not started (or working on stage 1)
+//         <stageStates>
+//           <l stage="1" done="false">  <blocksDone level1="15" level2="0" level3="0"/></l>
+//         </stageStates>
+//       </l>
+//       ...
+//     </states>
+//   </research>
+//
+// A tech is "researched" when every <l stage=N done=…> under stageStates has
+// done="true". For in-progress techs we report a fraction in [0,1):
+//   completed_stages = count(done="true")
+//   total_stages     = len(stageStates)
+//   progress         = completed_stages / total_stages   (only when 0 < progress < 1)
+// completed techs are listed; non-zero non-complete techs are surfaced as
+// researchProgress.
+function extractResearch(gameDoc) {
+  const completed = [];
+  const progress = {};
+  walk(gameDoc, (node) => {
+    if (!node.research || typeof node.research !== "object") return;
+    const states = node.research.states;
+    if (!states) return;
+    const arr = Array.isArray(states.l) ? states.l : states.l ? [states.l] : [];
+    for (const t of arr) {
+      const techId = asNum(t["@_techId"]);
+      if (techId == null) continue;
+      const ss = t.stageStates;
+      const stageArr = ss ? (Array.isArray(ss.l) ? ss.l : [ss.l]) : [];
+      if (stageArr.length === 0) continue;
+      const done = stageArr.filter((s) => asBool(s["@_done"])).length;
+      if (done === stageArr.length) {
+        completed.push(techId);
+      } else if (done > 0) {
+        progress[String(techId)] = done / stageArr.length;
+      }
+    }
+  });
+  return { completed, progress };
+}
+
 // ----- Standalone ships/ files -----
 
 function extractStandaloneShips(shipsDir) {
@@ -797,6 +852,7 @@ function parseSaveFolder(folder) {
   const growBeds = extractGrowBeds(gameDoc);
   const recipeRatios = extractRecipeRatios(gameDoc);
   const corpses = countCorpses(gameDoc);
+  const research = extractResearch(gameDoc);
   const timeline = timelineDoc ? extractTimeline(timelineDoc) : { events: [], currentDay: 0 };
 
   return {
@@ -811,6 +867,8 @@ function parseSaveFolder(folder) {
     growBeds,
     recipeRatios,
     corpses,
+    researchedTech: research.completed,
+    researchProgress: research.progress,
     timelineEvents: timeline.events,
     playerShipId,
     playerShipName,
@@ -857,6 +915,14 @@ function parseSaveFolderWithExtras(folder) {
           ? JSON.stringify(r.recipeRatios)
           : null,
       corpses: r.corpses ?? 0,
+      researched_tech_json:
+        r.researchedTech && r.researchedTech.length
+          ? JSON.stringify(r.researchedTech)
+          : null,
+      research_progress_json:
+        r.researchProgress && Object.keys(r.researchProgress).length
+          ? JSON.stringify(r.researchProgress)
+          : null,
     });
   }
   return r;
@@ -864,6 +930,6 @@ function parseSaveFolderWithExtras(folder) {
 
 module.exports = {
   parseSaveFolder: parseSaveFolderWithExtras,
-  _internals: { walk, readXml, hexToString, flattenCrew, extractBodies, extractJumpEdges, extractStuff, extractGrowBeds, extractRecipeRatios, countCorpses },
+  _internals: { walk, readXml, hexToString, flattenCrew, extractBodies, extractJumpEdges, extractStuff, extractGrowBeds, extractRecipeRatios, countCorpses, extractResearch },
   _extras: { set: _setExtras, get: _getExtras, clear: _clearExtras },
 };
