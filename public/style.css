@@ -99,8 +99,10 @@ header nav button.active {
 .live-indicator#live.off .dot { background: var(--extreme); box-shadow: 0 0 6px var(--extreme); }
 
 main { height: calc(100% - 44px); }
-.view { display: none; height: 100%; flex-direction: column; }
-.view.active { display: flex; }
+/* Tab sections (legacy + workspace). Scope to direct children of <main> so
+   the class name doesn't collide with dockview's internal .view elements. */
+main > .view { display: none; height: 100%; flex-direction: column; }
+main > .view.active { display: flex; }
 
 /* ----- Toolbar (filter row) ----- */
 .toolbar {
