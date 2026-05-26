@@ -602,6 +602,7 @@ function renderNutrition() {
 
   renderFoodStorage();
   renderRecipes();
+  renderCrops();
   $("nutrition-grid").innerHTML = rows.map(nutRow).join("");
 }
 
@@ -619,6 +620,28 @@ function isFoodItem(s) {
   return FOOD_NAME_HINTS.some((h) => name.includes(h));
 }
 
+// Icon index from /library/icons, populated on first load. Each entry is
+// { aid, w, h, atlas } for an element id we have a sprite for. We use the
+// keys as a "has-icon" set; the PNG is served at /icons/<id>.png.
+let iconIndex = null;
+async function ensureIconIndex() {
+  if (iconIndex) return iconIndex;
+  try {
+    const r = await fetch("/library/icons");
+    iconIndex = await r.json();
+  } catch {
+    iconIndex = {};
+  }
+  return iconIndex;
+}
+
+// Helper to render an icon for an element id; falls back to nothing when the
+// extractor didn't manage to crop that sprite.
+function iconImg(elementId, alt) {
+  if (!iconIndex || !iconIndex[elementId]) return "";
+  return `<img class="item-icon" src="/icons/${elementId}.png" alt="${esc(alt || "")}" loading="lazy">`;
+}
+
 function renderFoodStorage() {
   const body = $("food-storage-body");
   if (!body) return;
@@ -631,9 +654,37 @@ function renderFoodStorage() {
   }
   body.innerHTML = foods
     .map((s) => `<div class="food-item">`
+       + iconImg(s.elementary_id, s.name)
        + `<span class="food-name">${esc(s.name || `Item #${s.elementary_id}`)}</span>`
        + `<span class="food-count">${formatNum(s.count)}</span>`
        + `</div>`)
+    .join("");
+}
+
+function renderCrops() {
+  const body = $("crops-body");
+  if (!body) return;
+  const byElement = state.snapshot.crops?.byElement || {};
+  const entries = Object.entries(byElement);
+  if (entries.length === 0) {
+    body.innerHTML = `<div class="muted">No grow beds.</div>`;
+    return;
+  }
+  entries.sort((a, b) => b[1].count - a[1].count);
+  body.innerHTML = entries
+    .map(([eid, info]) => {
+      const avgGrowth = info.count > 0 ? info.totalGrowth / info.count : 0;
+      const pct = Math.round(avgGrowth * 100);
+      return `<div class="crop-item">`
+        + iconImg(eid, info.name)
+        + `<span class="crop-name">${esc(info.name || `Item #${eid}`)}</span>`
+        + `<span class="crop-count">×${info.count}</span>`
+        + `<span class="crop-bar" title="average growth ${pct}%">`
+          + `<span class="crop-bar-fill" style="width:${pct}%"></span>`
+        + `</span>`
+        + `<span class="crop-pct">${pct}%</span>`
+        + `</div>`;
+    })
     .join("");
 }
 
@@ -728,7 +779,9 @@ function renderRecipes() {
 }
 
 function recipeCard(r, canMake) {
-  const elem = (e) => `<a class="rc-elem" href="#" data-elementary-id="${esc(e.element_id)}">${esc(e.name)}×${e.count}</a>`;
+  const elem = (e) => `<a class="rc-elem" href="#" data-elementary-id="${esc(e.element_id)}">`
+    + iconImg(e.element_id, e.name)
+    + `${esc(e.name)}×${e.count}</a>`;
   const ins = (r.inputs || []).map(elem).join(", ") || "—";
   const outs = (r.outputs || []).map(elem).join(", ") || "—";
   const badge = canMake != null
@@ -789,7 +842,11 @@ function renderStorage() {
     );
     const total = items.reduce((sum, s) => sum + s.count, 0);
     const rows = items
-      .map((s) => `<div class="storage-item" data-elementary-id="${esc(s.elementary_id)}"><span>${esc(s.name || `Item #${s.elementary_id}`)}</span><span>${formatNum(s.count)}</span></div>`)
+      .map((s) => `<div class="storage-item" data-elementary-id="${esc(s.elementary_id)}">`
+        + iconImg(s.elementary_id, s.name)
+        + `<span>${esc(s.name || `Item #${s.elementary_id}`)}</span>`
+        + `<span>${formatNum(s.count)}</span>`
+        + `</div>`)
       .join("");
     return `<div class="storage-category">
       <h3 class="storage-category-head"><span>${esc(cat)}</span><span class="muted">${formatNum(total)} units</span></h3>
@@ -1827,4 +1884,8 @@ fetch("/version")
   .then((j) => { $("app-version").textContent = "v" + j.version; })
   .catch(() => { $("app-version").textContent = ""; });
 
-loadDays().then(ensureShipPath).then(ensureRecipes).then(startSSE);
+loadDays()
+  .then(ensureShipPath)
+  .then(ensureRecipes)
+  .then(ensureIconIndex)
+  .then(startSSE);

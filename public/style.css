@@ -437,7 +437,7 @@ main { height: calc(100% - 44px); }
 }
 .food-top {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 0.8rem;
 }
 .food-panel {
@@ -463,14 +463,51 @@ main { height: calc(100% - 44px); }
   overflow: auto;
 }
 .food-panel-body .food-item {
-  display: flex; justify-content: space-between;
-  padding: 0.15rem 0;
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.2rem 0;
   border-bottom: 1px solid var(--border);
   font-variant-numeric: tabular-nums;
 }
 .food-panel-body .food-item:last-child { border-bottom: none; }
-.food-panel-body .food-name { color: var(--text); }
+.food-panel-body .food-name { color: var(--text); flex: 1; }
 .food-panel-body .food-count { color: var(--text-dim); }
+
+/* In-game sprite icons. The extractor crops them at native size (~28px tall);
+   render at that size everywhere we display an item, no scaling. */
+.item-icon {
+  display: inline-block;
+  width: 28px; height: 28px;
+  object-fit: contain;
+  image-rendering: pixelated;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+/* Crops-growing panel. Each row: icon, name, count, growth bar, percentage. */
+.food-panel-body .crop-item {
+  display: grid;
+  grid-template-columns: 28px 1fr auto 80px 36px;
+  align-items: center; gap: 0.4rem;
+  padding: 0.2rem 0;
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+.food-panel-body .crop-item:last-child { border-bottom: none; }
+.food-panel-body .crop-name { color: var(--text); }
+.food-panel-body .crop-count { color: var(--text-dim); font-size: 0.78rem; }
+.crop-bar {
+  position: relative;
+  display: inline-block;
+  width: 80px; height: 8px;
+  background: var(--bg-3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.crop-bar-fill {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  background: linear-gradient(90deg, #6a4d0a 0%, #d4a017 70%, #2ecc71 100%);
+}
+.food-panel-body .crop-pct { color: var(--text-dim); font-size: 0.78rem; text-align: right; }
 .recipe-toggle { display: inline-flex; gap: 0.25rem; }
 .rt-btn {
   background: var(--bg); border: 1px solid var(--border);
@@ -537,12 +574,14 @@ main { height: calc(100% - 44px); }
   font-size: 0.85rem;
 }
 .storage-item {
-  display: flex; justify-content: space-between;
+  display: flex; align-items: center; gap: 0.4rem;
   padding: 0.2rem 0.4rem;
   background: var(--bg-3);
   border-radius: 3px;
   font-variant-numeric: tabular-nums;
 }
+.storage-item > span:nth-of-type(1) { flex: 1; }       /* name */
+.storage-item .item-icon { width: 20px; height: 20px; }
 
 /* ====================================================================
    GALAXY VIEW
@@ -774,7 +813,9 @@ main { height: calc(100% - 44px); }
   color: var(--text);
   text-decoration: none;
   border-bottom: 1px dotted var(--text-dim);
+  display: inline-flex; align-items: center; gap: 0.2rem;
 }
+.recipe-card .rc-elem .item-icon { width: 16px; height: 16px; }
 .recipe-card .rc-elem:hover { color: var(--accent); border-bottom-color: var(--accent); }
 
 /* ====================================================================
