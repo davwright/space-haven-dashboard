@@ -291,7 +291,7 @@ We do NOT refactor today. We bias new code so the refactor is small.
 
 | Phase | What                                                                                   |
 | ----- | -------------------------------------------------------------------------------------- |
-| 0     | Today. Write the framework primitives (`applyOp`, `bindCell`) into a new module but don't wire any renders to them yet. |
+| 0     | **Done.** Framework primitives (`applyOp`, `applyOps`, `bindCell`, `replaceTree`, `normalizeSnapshot`) shipped in `public/state.js`. Status tab migrated to `bindCell` as proof-of-concept. SSE `snapshot` events now feed `SH.replaceTree`; `patch` events are routed to `SH.applyOps` (stubbed pending agent). |
 | 0.5   | New render code (e.g. food icons, grow-beds) lands in the "function takes only its data, no `state.snapshot` reads inside loops" style. |
 | 1     | Java agent prototype connects, emits patches over WebSocket to Node. Node fans out to SSE. Browser logs ops but doesn't apply yet. |
 | 2     | Status tab migrates to bind-cell rendering. Verify perf on real stream. |

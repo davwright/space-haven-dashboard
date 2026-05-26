@@ -140,6 +140,18 @@ cleanly to anything in `library/haven`, so `src/lookups.js#skillInfo` still
 returns `Skill #N` placeholders. If you find a reliable mapping, please open
 an issue or PR.
 
+## Live streaming
+
+The dashboard is being moved from "poll the savefile" to "stream from the
+running game." The browser is now built around a small path-binding
+framework (`public/state.js`) so future patch frames can route surgically
+to the right DOM nodes without a full re-render. The current SSE `snapshot`
+event still drives most tabs; the Status tab has been migrated as the
+proof-of-concept.
+
+- Architecture and protocol: [`docs/live-streaming-design.md`](docs/live-streaming-design.md)
+- Background research: [`docs/streaming-research.md`](docs/streaming-research.md)
+
 ## Tests
 
 ```bash
