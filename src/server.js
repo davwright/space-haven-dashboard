@@ -8,6 +8,7 @@ const watcher = require("./watcher");
 const history = require("./history");
 const { port, projectRoot, saveRoot } = require("./config");
 const { importLibrary, findJar, needsImport } = require("../scripts/import-library");
+const { extractIcons } = require("../scripts/extract-icons");
 
 const sseClients = new Set();
 
@@ -28,6 +29,10 @@ const mime = {
   ".css": "text/css; charset=utf-8",
   ".json": "application/json; charset=utf-8",
   ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
 };
 
 function serveStatic(req, res) {
@@ -97,6 +102,21 @@ const server = http.createServer((req, res) => {
     return jsonRes(res, 200, history.listRecipes());
   }
 
+  if (pathname === "/library/icons") {
+    // Map of element_id -> { aid, w, h, atlas }. Frontend builds <img
+    // src="/icons/<id>.png"> from the keys; the metadata helps sizing/CSS.
+    // Returns empty object if extraction never ran.
+    try {
+      const file = path.join(projectRoot, "public", "icons", "index.json");
+      const raw = fs.readFileSync(file, "utf8");
+      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+      res.end(raw);
+      return;
+    } catch {
+      return jsonRes(res, 200, {});
+    }
+  }
+
   if (pathname === "/status") {
     const days = history.listDays();
     return jsonRes(res, 200, {
@@ -123,14 +143,21 @@ function maybeImportLibrary() {
   const status = needsImport(jar);
   if (!status.needed) {
     console.log(`[server] library up to date (${status.reason})`);
-    return;
+  } else {
+    console.log(`[server] importing game library from ${jar} (${status.reason})...`);
+    try {
+      importLibrary(jar);
+    } catch (err) {
+      console.error("[server] library import failed:", err.message);
+      console.error("[server] continuing without name lookups");
+    }
   }
-  console.log(`[server] importing game library from ${jar} (${status.reason})...`);
+  // Icon extraction shares the same jar; idempotent against jar mtime.
   try {
-    importLibrary(jar);
+    extractIcons({ jarPath: jar });
   } catch (err) {
-    console.error("[server] library import failed:", err.message);
-    console.error("[server] continuing without name lookups");
+    console.error("[server] icon extraction failed:", err.message);
+    console.error("[server] continuing without icons (frontend falls back to glyphs)");
   }
 }
 

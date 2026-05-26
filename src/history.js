@@ -6,7 +6,7 @@
 // are returned with a `lastSeenDay` so the UI can fade them.
 
 const db = require("./db");
-const { decorateCrew, decorateStorage } = require("./lookups");
+const { decorateCrew, decorateStorage, elementInfo } = require("./lookups");
 
 function listDays() {
   return db
@@ -163,6 +163,39 @@ function fullSnapshot(snapshotId, gameDay) {
       .all(snapshotId)
   );
 
+  // Grow beds: per-plant rows + per-crop aggregate. We resolve plant names
+  // here from the library (saves don't carry names; the ingest just stored
+  // the numeric crop element id).
+  const growBedRows = (() => {
+    try {
+      return db
+        .prepare(
+          "SELECT plant_id, plant_name, growth, stage, bed_x, bed_y, ship_id FROM grow_bed_observations WHERE snapshot_id = ?"
+        )
+        .all(snapshotId);
+    } catch {
+      return [];
+    }
+  })();
+  const growBeds = growBedRows.map((r) => ({
+    plant_id: r.plant_id,
+    plant_name: r.plant_name || elementInfo(r.plant_id).name,
+    growth: r.growth,
+    stage: r.stage,
+    bed_x: r.bed_x,
+    bed_y: r.bed_y,
+    ship_id: r.ship_id,
+  }));
+  const cropAgg = {};
+  for (const b of growBeds) {
+    const key = String(b.plant_id);
+    if (!cropAgg[key]) {
+      cropAgg[key] = { name: b.plant_name, count: 0, totalGrowth: 0 };
+    }
+    cropAgg[key].count += 1;
+    cropAgg[key].totalGrowth += b.growth || 0;
+  }
+
   return {
     snapshotId,
     gameDay,
@@ -171,6 +204,8 @@ function fullSnapshot(snapshotId, gameDay) {
     crew,
     events,
     storage,
+    growBeds,
+    crops: { byElement: cropAgg },
   };
 }
 

@@ -478,6 +478,101 @@ function extractStorage(gameDoc) {
   return [...totals.entries()].map(([elementary_id, count]) => ({ elementary_id, count }));
 }
 
+// ----- Grow beds (what crop is growing where) -----
+//
+// Grow beds in the save look like this:
+//
+//   <e x=".." y=".." m="921" id="-1" rot="..">      <!-- the bed building -->
+//     <l ind="0" ...>
+//       <feat cp="..">
+//         <grow cpri="0">                            <!-- bed feature -->
+//           <inv>...</inv>                          <!-- harvested output -->
+//           <cinv>                                  <!-- bed consumables -->
+//             <f element="16"   value="0.99"/>      <!-- 16 = Water -->
+//             <f element="2475" value="0.8"/>       <!-- 2475 = Fertilizer -->
+//           </cinv>
+//         </grow>
+//       </feat>
+//     </l>
+//     <l ind="1" ...>
+//       <g time="520.9" c="17" st="0" ch="100" se="1" cg="1" ple="1" skup="0"/>
+//                  <!-- one plant slot. c=crop element id, st=stage 0..3,
+//                       time=time elapsed in current stage, ple=planted? -->
+//     </l>
+//     ...more <l> slots, some with <g>, some empty
+//   </e>
+//
+// Crops have 4 visible growth stages (haven defines time≈1300 per stage), so
+// approximate growth = (st + time/1300) / 4 clamped to [0,1]. We can refine
+// later if a stage-time lookup is added, but 1300 is the value for every crop
+// we sampled (root veggies / fruits / meat / fibers / nuts / grains).
+//
+// Stage label is reported alongside the fraction so the UI can distinguish
+// "Mature" (st=3 / fraction≈1) from "Growing".
+//
+// Detection: any <l> whose direct parent <e> contains a descendant <grow>
+// block. We don't filter by `m=` so this works for every grow-bed variant
+// (mid 184/185/921 today, plus any future ones).
+
+const STAGE_TIME = 1300; // verified for every crop product in haven (2026-05-26)
+const STAGE_LABELS = { 0: "Seedling", 1: "Growing", 2: "Maturing", 3: "Mature" };
+
+function extractGrowBeds(gameDoc, parsedShips) {
+  const beds = [];
+  walk(gameDoc, (node, chain) => {
+    if (!node || typeof node !== "object") return;
+    // We want each <e> entity that has a <grow> somewhere inside it.
+    if (node["@_m"] == null) return; // not an <e> with a build-element id
+    // Cheap probe: is there a <feat><grow> anywhere in the subtree?
+    let hasGrow = false;
+    walk(node, (n) => {
+      if (n && typeof n === "object" && n.grow !== undefined) hasGrow = true;
+    });
+    if (!hasGrow) return;
+
+    const bedX = asNum(node["@_x"]);
+    const bedY = asNum(node["@_y"]);
+    const bedMid = node["@_m"] != null ? String(node["@_m"]) : null;
+
+    // Nearest ancestor with sid/sname is the ship hosting this bed.
+    let shipSid = null;
+    for (const anc of chain) {
+      if (anc["@_sid"] !== undefined) {
+        shipSid = String(anc["@_sid"]);
+        break;
+      }
+    }
+
+    // Each <l> inside the bed may carry a <g> describing one plant slot.
+    const lArr = Array.isArray(node.l) ? node.l : node.l ? [node.l] : [];
+    for (const l of lArr) {
+      if (!l.g) continue;
+      const g = l.g;
+      const cropId = asNum(g["@_c"]);
+      const planted = asBool(g["@_ple"]);
+      if (!planted || cropId == null) continue;
+      const stage = asNum(g["@_st"]) ?? 0;
+      const time = asNum(g["@_time"]) ?? 0;
+      // Approximate fractional growth across all four visible stages.
+      const stageFrac = Math.min(1, Math.max(0, time / STAGE_TIME));
+      const growth = Math.min(1, Math.max(0, (stage + stageFrac) / 4));
+      beds.push({
+        plant_id: cropId,
+        plant_name: null, // resolved at API boundary (we don't have library access here)
+        growth,
+        stage: STAGE_LABELS[stage] || `Stage ${stage}`,
+        stage_index: stage,
+        bed_x: asNum(l["@_x"]) ?? bedX,
+        bed_y: asNum(l["@_y"]) ?? bedY,
+        bed_mid: bedMid,
+        ship_id: shipSid,
+        tending: asNum(g["@_tends"]) ?? 0,
+      });
+    }
+  });
+  return beds;
+}
+
 // ----- Star jumps (hyperspace network) -----
 //
 // The save's <starmap><slines><s s1 sy1 s2 sy2 [w] [bs] [ips] [mp]/> list IS
@@ -610,6 +705,7 @@ function parseSaveFolder(folder) {
 
   const storage = extractStorage(gameDoc);
   const jumpEdges = extractJumpEdges(gameDoc);
+  const growBeds = extractGrowBeds(gameDoc);
   const timeline = timelineDoc ? extractTimeline(timelineDoc) : { events: [], currentDay: 0 };
 
   return {
@@ -621,6 +717,7 @@ function parseSaveFolder(folder) {
     crew,
     storage,
     jumpEdges,
+    growBeds,
     timelineEvents: timeline.events,
     playerShipId,
     playerShipName,
@@ -661,6 +758,7 @@ function parseSaveFolderWithExtras(folder) {
     _setExtras(r.savePath, {
       bodies: byBody,
       jump_edges_json: r.jumpEdges && r.jumpEdges.length ? JSON.stringify(r.jumpEdges) : null,
+      grow_beds: r.growBeds || [],
     });
   }
   return r;
@@ -668,6 +766,6 @@ function parseSaveFolderWithExtras(folder) {
 
 module.exports = {
   parseSaveFolder: parseSaveFolderWithExtras,
-  _internals: { walk, readXml, hexToString, flattenCrew, extractBodies, extractJumpEdges, extractStuff },
+  _internals: { walk, readXml, hexToString, flattenCrew, extractBodies, extractJumpEdges, extractStuff, extractGrowBeds },
   _extras: { set: _setExtras, get: _getExtras, clear: _clearExtras },
 };

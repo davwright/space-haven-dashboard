@@ -119,6 +119,19 @@ db.exec(`
     PRIMARY KEY (snapshot_id, elementary_id),
     FOREIGN KEY (snapshot_id) REFERENCES snapshots(snapshot_id) ON DELETE CASCADE
   );
+
+  CREATE TABLE IF NOT EXISTS grow_bed_observations (
+    snapshot_id INTEGER NOT NULL,
+    plant_id INTEGER NOT NULL,
+    plant_name TEXT,
+    growth REAL,
+    stage TEXT,
+    bed_x INTEGER NOT NULL,
+    bed_y INTEGER NOT NULL,
+    ship_id INTEGER,
+    PRIMARY KEY (snapshot_id, bed_x, bed_y, ship_id),
+    FOREIGN KEY (snapshot_id) REFERENCES snapshots(snapshot_id) ON DELETE CASCADE
+  );
 `);
 
 // Older databases may have a richer body_observations schema added; gracefully
@@ -175,6 +188,9 @@ const _updateBodyExtras = _rawPrepare(
 const _updateSnapshotJumps = _rawPrepare(
   "UPDATE snapshots SET jump_edges_json = ? WHERE snapshot_id = ?"
 );
+const _insertGrowBed = _rawPrepare(
+  "INSERT OR REPLACE INTO grow_bed_observations (snapshot_id, plant_id, plant_name, growth, stage, bed_x, bed_y, ship_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+);
 const _lookupSavePath = _rawPrepare("SELECT save_path FROM snapshots WHERE snapshot_id = ?");
 
 function loadExtras() {
@@ -225,6 +241,23 @@ db.prepare = function wrappedPrepare(sql) {
           const payload = loadExtras()?.get(savePath);
           if (payload && payload.jump_edges_json) {
             _updateSnapshotJumps.run(payload.jump_edges_json, snapshotId);
+          }
+          if (payload && Array.isArray(payload.grow_beds)) {
+            for (const gb of payload.grow_beds) {
+              // Composite PK is (snapshot, bed_x, bed_y, ship_id). Skip rows
+              // missing coordinates — we'd silently collapse them.
+              if (gb.bed_x == null || gb.bed_y == null) continue;
+              _insertGrowBed.run(
+                snapshotId,
+                gb.plant_id,
+                gb.plant_name,
+                gb.growth,
+                gb.stage,
+                gb.bed_x,
+                gb.bed_y,
+                gb.ship_id != null ? Number(gb.ship_id) : null
+              );
+            }
           }
         } catch {
           // Best-effort.
