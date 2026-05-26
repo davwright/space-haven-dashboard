@@ -198,6 +198,27 @@ cards. Users dismiss with a click; clicking the body of a card can
 optionally highlight whatever the notification is *about* (a crew member
 in the status widget, a body on the map, a storage item, etc.).
 
+### Example: actionable game-state alert
+
+The motivating use case is alerts the player would otherwise miss because
+they're not staring at the right tab:
+
+> 🛰  **Rocks flying by — starfighter is docked**
+>   3 minable asteroids passed through the current system in the last
+>   minute. Your starfighter "Hummingbird" has its launch policy set to
+>   "Stay docked".
+>
+>   [Show on map] [Open starfighter config] [Dismiss]
+
+The dashboard detects the condition (asteroid present in current system
++ player starfighter exists + launch policy ≠ "Launch when threatened
+/ rocks nearby"), emits one notification, and provides actions that
+focus the relevant widgets so the user can fix it without hunting
+through tabs.
+
+This pattern — detect → notify with context → click to act — is the
+notifications system's reason to exist.
+
 ### Notification shape
 
 ```js
