@@ -7,6 +7,14 @@ you rebalance space. Hierarchical — every pane is either a tab-group of
 widgets or a split with two children, recursively. Same paradigm as
 VSCode, JetBrains IDEs, Tableau, JupyterLab.
 
+**Constraint:** Widgets must respect both invariants from
+`capability-gating-design.md`:
+1. **No omniscience** — only show data the player could have learned
+   in-game. Memory and aggregation are fair; unobserved facts are not.
+2. **Capability gating** (future) — widgets may declare `requires`
+   predicates so they lock when the ship lacks the needed component or
+   crew skill.
+
 ## End-state UX
 
 - One **workspace** = a tree of panes

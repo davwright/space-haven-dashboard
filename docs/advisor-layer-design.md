@@ -2,6 +2,12 @@
 
 The dashboard so far surfaces *raw game state*. The advisor layer is a
 separate concern: **derived insights the game itself never tells you**.
+
+**Constraint:** The advisor must respect the omniscience invariant
+documented in `capability-gating-design.md` → "No omniscience." Rules
+can only reason about data the player could have learned in-game.
+They cannot invent unseen facts. If the user hasn't scanned a system,
+no rule reasons about its contents.
 Examples the user has named:
 
 - 🛰  Asteroids are passing through your current system but your

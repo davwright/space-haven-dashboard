@@ -69,6 +69,16 @@ existing band CSS. ~40 LOC.
 
 ## Backlog — known wants, not started
 
+- **Omniscience audit**: pass over all existing widgets + advisor rules
+  to confirm none leak data the player couldn't have learned in-game.
+  Document each widget's data dependencies and verify each is gated by
+  the appropriate player-observable flag (`isVisible`, `visited`,
+  `scanned`, `inspected`, etc.). The invariant is documented in
+  `capability-gating-design.md`.
+- **Capability gating**: future feature. Widgets and rules declare
+  `requires` predicates (building presence, crew skill level,
+  research). Locked widgets show greyed-out with explanation. See
+  `capability-gating-design.md` for the design.
 - **Storage widget internal layout**: categories draggable to reorder,
   collapsible per-category (header click), reflow on container resize
   (CSS Grid auto-fill + ResizeObserver). State persists in widget
