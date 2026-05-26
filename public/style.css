@@ -192,6 +192,21 @@ main { height: calc(100% - 44px); }
 .stat-bar.s-neutral .fill { background: var(--neutral); }
 .stat-bar.s-content .fill { background: var(--content); }
 .stat-bar.s-happy   .fill { background: var(--happy); }
+
+/* Overflow indicator: value > 100 renders an "over-fill" segment that
+   bleeds out past the right edge in a brighter/striped style so it's
+   visually distinct from a maxed-out bar. */
+.stat-bar.over { box-shadow: 0 0 6px rgba(46, 204, 113, 0.6); }
+.stat-bar .over-fill {
+  position: absolute;
+  left: 100%; top: 0; bottom: 0;
+  background: repeating-linear-gradient(
+    -45deg,
+    #2ecc71, #2ecc71 4px,
+    #1abc9c 4px, #1abc9c 8px
+  );
+  border-radius: 0 2px 2px 0;
+}
 .stat-bar .val {
   position: relative;
   z-index: 1;

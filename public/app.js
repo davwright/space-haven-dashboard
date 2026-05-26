@@ -273,13 +273,23 @@ function statBar(key, val, longVal) {
   const sev = severity(key, val);
   const tr = trend(val, longVal);
   const arrow = tr ? `<span class="trend ${tr}">${tr === "up" ? "▲" : "▼"}</span>` : "";
-  // Fill percent: mood is -100..100, map to 0..100. Everything else 0..100 (clamp).
-  let pct;
-  if (key === "mood") pct = Math.max(0, Math.min(100, (val + 100) / 2));
-  else pct = Math.max(0, Math.min(100, val));
-  const tip = longVal != null ? `${Math.round(val)} (long-term ${Math.round(longVal)})` : `${Math.round(val)}`;
-  return `<span class="stat-bar s-${sev}" title="${tip}">`
-       + `<span class="fill" style="width:${pct}%"></span>`
+  // Fill width: mood is -100..100 (map to 0..100). Vitals can exceed 100
+  // (food/rest go up to ~150). Show the first 100 as the normal fill, render
+  // anything >100 as an "over" segment that overlaps the right edge.
+  let basePct, overPct = 0;
+  if (key === "mood") {
+    basePct = Math.max(0, Math.min(100, (val + 100) / 2));
+  } else {
+    basePct = Math.max(0, Math.min(100, val));
+    if (val > 100) overPct = Math.min(50, val - 100);  // up to +50 over visually
+  }
+  const overflowAttr = overPct > 0 ? " over" : "";
+  const tip = longVal != null
+    ? `${Math.round(val)} (long-term ${Math.round(longVal)})`
+    : `${Math.round(val)}`;
+  return `<span class="stat-bar s-${sev}${overflowAttr}" title="${tip}">`
+       + `<span class="fill" style="width:${basePct}%"></span>`
+       + (overPct > 0 ? `<span class="over-fill" style="width:${overPct}%"></span>` : "")
        + `<span class="val">${Math.round(val)}</span>`
        + arrow
        + `</span>`;
