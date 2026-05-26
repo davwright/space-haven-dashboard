@@ -1177,17 +1177,22 @@ main > .view.active { display: flex; }
   border-bottom: 1px solid var(--border);
   font-size: 0.85rem;
 }
+/* CSS Multi-Column layout. Categories flow top-to-bottom in each column;
+   when a column fills, items spill to the next column. Collapsed
+   categories shrink to header-only height, so columns pack tight
+   vertically instead of leaving empty cells. */
 .sh-widget .sa-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 0.6rem;
+  column-width: 240px;
+  column-gap: 0.6rem;
   padding: 0.6rem;
   flex: 1;
-  align-content: start;
   overflow: auto;
 }
 .sh-widget .sa-grid .storage-category {
-  margin: 0;
+  display: inline-block;       /* mandatory inside columns; avoids breaking mid-card */
+  width: 100%;
+  break-inside: avoid;
+  margin: 0 0 0.6rem 0;
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: 3px;
