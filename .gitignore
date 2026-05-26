@@ -21,3 +21,7 @@ public/icons/
 # OS junk
 .DS_Store
 Thumbs.db
+
+# Java agent build output
+agent/target/
+agent/lib/

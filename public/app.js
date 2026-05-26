@@ -1693,6 +1693,36 @@ function startSSE() {
     await ensureRecipes();
     await renderTickMarks();
   });
+
+  // Java agent liveness: any heartbeat frame within the last 10s = green.
+  // We don't trust the server-side `agent-status` event alone — if it's
+  // missed (refresh, etc.) we'd be stuck on "offline" forever. Frames
+  // self-heal that.
+  let agentTimer = null;
+  function markAgentOnline(label) {
+    const el = $("agent");
+    el.classList.remove("off");
+    $("agent-label").textContent = label;
+    if (agentTimer) clearTimeout(agentTimer);
+    agentTimer = setTimeout(() => {
+      el.classList.add("off");
+      $("agent-label").textContent = "Agent: offline";
+    }, 10_000);
+  }
+  es.addEventListener("agent-status", (ev) => {
+    try {
+      const data = JSON.parse(ev.data);
+      if (data && data.connected) markAgentOnline("Agent: connected");
+    } catch {}
+  });
+  es.addEventListener("agent-heartbeat", (ev) => {
+    try {
+      const data = JSON.parse(ev.data);
+      const tick = data && Number.isFinite(data.tick) ? data.tick : null;
+      markAgentOnline(tick != null ? `Agent: tick ${tick}` : "Agent: connected");
+    } catch {}
+  });
+
   es.onerror = () => $("live").classList.add("off");
 }
 

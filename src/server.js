@@ -9,6 +9,7 @@ const history = require("./history");
 const { port, projectRoot, saveRoot } = require("./config");
 const { importLibrary, findJar, needsImport } = require("../scripts/import-library");
 const { extractIcons } = require("../scripts/extract-icons");
+const { startAgentBridge } = require("./agent-bridge");
 
 const sseClients = new Set();
 
@@ -173,6 +174,14 @@ function main() {
     console.log(`[server] new snapshot ${result.snapshotId}`);
     sendSse("snapshot", { snapshotId: result.snapshotId });
   });
+
+  // Java agent connection lives on its own port (7878). Frames received from
+  // the agent get republished as SSE events for the browser dashboard.
+  try {
+    startAgentBridge({ onEvent: sendSse });
+  } catch (err) {
+    console.error(`[server] agent bridge failed to start: ${err.message}`);
+  }
 
   server.listen(port, () => {
     console.log(`[server] listening on http://localhost:${port}`);

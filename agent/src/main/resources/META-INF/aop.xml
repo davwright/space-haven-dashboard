@@ -1,0 +1,19 @@
+<!DOCTYPE aspectj PUBLIC "-//AspectJ//DTD//EN" "http://www.eclipse.org/aspectj/dtd/aspectj.dtd">
+<!--
+  AspectJ load-time weaver configuration.
+
+  The weaver is loaded as a separate -javaagent (aspectjweaver-1.9.19.jar);
+  it picks up this aop.xml from every jar on the classpath at META-INF/aop.xml
+  and weaves the aspects it declares.
+
+  We restrict weaving to fi.bugbyte..* (the game's package) — touching every
+  loaded class costs startup time and risks weaving JDK internals.
+-->
+<aspectj>
+  <aspects>
+    <aspect name="dev.spacehaven.dashboard.agent.HeartbeatAspect"/>
+  </aspects>
+  <weaver options="-Xlint:ignore">
+    <include within="fi.bugbyte..*"/>
+  </weaver>
+</aspectj>

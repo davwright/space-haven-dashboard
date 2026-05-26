@@ -1,0 +1,6 @@
+Manifest-Version: 1.0
+Premain-Class: dev.spacehaven.dashboard.agent.Agent
+Agent-Class: dev.spacehaven.dashboard.agent.Agent
+Can-Redefine-Classes: true
+Can-Retransform-Classes: true
+

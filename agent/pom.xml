@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Space Haven Dashboard streaming agent.
+
+  Builds a single fat-jar (`agent/target/agent.jar`) that is loaded into the
+  Space Haven JVM via -javaagent. The jar bundles the Java-WebSocket client so
+  the game's classloader can resolve it without extra classpath entries.
+
+  AspectJ weaver is NOT shaded in — it must be loaded as its own -javaagent on
+  the command line (see launch.bat). That's how AspectJ load-time weaving is
+  designed to work and matches the modloader's pattern.
+
+  Target: Java 8. The game ships a bundled Zulu JRE 1.8.0_472, so anything
+  newer than 8 will fail to load. Don't bump the source/target.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>dev.spacehaven.dashboard</groupId>
+  <artifactId>agent</artifactId>
+  <version>0.1.0</version>
+  <packaging>jar</packaging>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.source>1.8</maven.compiler.source>
+    <maven.compiler.target>1.8</maven.compiler.target>
+    <aspectj.version>1.9.19</aspectj.version>
+  </properties>
+
+  <dependencies>
+    <!--
+      AspectJ runtime is required at compile time so the aspect compiles
+      against the @Aspect / @Before annotations. At runtime it's supplied by
+      the aspectjweaver-1.9.19.jar that we pass as a separate -javaagent.
+    -->
+    <dependency>
+      <groupId>org.aspectj</groupId>
+      <artifactId>aspectjrt</artifactId>
+      <version>${aspectj.version}</version>
+      <scope>provided</scope>
+    </dependency>
+
+    <!--
+      WebSocket client. Shaded into the agent jar so we don't need to wrestle
+      with the game's classpath. Java-WebSocket 1.5.6 still supports JDK 8.
+    -->
+    <dependency>
+      <groupId>org.java-websocket</groupId>
+      <artifactId>Java-WebSocket</artifactId>
+      <version>1.5.6</version>
+    </dependency>
+
+    <!-- SLF4J no-op so Java-WebSocket doesn't print "no logger" warnings. -->
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-nop</artifactId>
+      <version>1.7.36</version>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <finalName>agent</finalName>
+    <resources>
+      <resource>
+        <directory>src/main/resources</directory>
+      </resource>
+    </resources>
+    <plugins>
+      <plugin>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.13.0</version>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <version>3.4.1</version>
+        <configuration>
+          <archive>
+            <manifestFile>src/main/resources/META-INF/MANIFEST.MF</manifestFile>
+          </archive>
+        </configuration>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <version>3.6.0</version>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals><goal>shade</goal></goals>
+            <configuration>
+              <createDependencyReducedPom>false</createDependencyReducedPom>
+              <transformers>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                  <manifestEntries>
+                    <Premain-Class>dev.spacehaven.dashboard.agent.Agent</Premain-Class>
+                    <Agent-Class>dev.spacehaven.dashboard.agent.Agent</Agent-Class>
+                    <Can-Redefine-Classes>true</Can-Redefine-Classes>
+                    <Can-Retransform-Classes>true</Can-Retransform-Classes>
+                  </manifestEntries>
+                </transformer>
+              </transformers>
+              <filters>
+                <filter>
+                  <artifact>*:*</artifact>
+                  <excludes>
+                    <exclude>META-INF/*.SF</exclude>
+                    <exclude>META-INF/*.DSA</exclude>
+                    <exclude>META-INF/*.RSA</exclude>
+                    <exclude>module-info.class</exclude>
+                  </excludes>
+                </filter>
+              </filters>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

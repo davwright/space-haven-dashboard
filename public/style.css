@@ -87,7 +87,8 @@ header nav button.active {
   background: var(--happy);
   box-shadow: 0 0 6px var(--happy);
 }
-.live-indicator.off .dot { background: var(--extreme); box-shadow: 0 0 6px var(--extreme); }
+.live-indicator.off .dot { background: var(--text-dim); box-shadow: none; }
+.live-indicator#live.off .dot { background: var(--extreme); box-shadow: 0 0 6px var(--extreme); }
 
 main { height: calc(100% - 44px); }
 .view { display: none; height: 100%; flex-direction: column; }
